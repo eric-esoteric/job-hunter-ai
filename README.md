@@ -1,4 +1,4 @@
-# eric-esoteric-developer
+# Job Hunter AI by eric-esoteric
 
 🎯 Job Hunter AI
 
