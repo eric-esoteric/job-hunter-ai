@@ -1,4 +1,4 @@
-<img width="1364" height="1560" alt="3" src="https://github.com/user-attachments/assets/3b1d59cd-9eaa-4fbc-b60c-fccd6a1d25fa" /># Job Hunter AI by eric-esoteric
+# Job Hunter AI by eric-esoteric
 
 🎯 Job Hunter AI (v1.0)
 
