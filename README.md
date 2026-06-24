@@ -6,7 +6,7 @@
 
 [![Python Version](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org)
 [![Release](https://img.shields.io/badge/Release-v1.0.0-10B981?style=flat-square)](https://github.com/eric-esoteric/job-hunter-ai)
-[![License](https://img.shields.io/badge/License-MIT-D97706?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/License-Non--Commercial-crimson?style=flat-square)](license.txt)
 
 ---
 
