@@ -1,0 +1,3 @@
+customtkinter
+flask
+flask_cors
