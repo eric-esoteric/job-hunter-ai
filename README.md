@@ -1,6 +1,16 @@
-# Job Hunter AI by eric-esoteric
+<div align="center">
 
-🎯 Job Hunter AI (v1.0)
+# 🎯 Job Hunter AI
+
+### **Персональный интеллектуальный ассистент по автоматизации карьеры**
+
+[![Python Version](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org)
+[![Release](https://img.shields.io/badge/Release-v1.0.0-10B981?style=flat-square)](https://github.com/eric-esoteric/job-hunter-ai)
+[![License](https://img.shields.io/badge/License-MIT-D97706?style=flat-square)](LICENSE)
+
+---
+
+</div>
 
 Job Hunter AI — это ваш персональный интеллектуальный ассистент, который превращает хаотичный поиск работы в упорядоченный автоматизированный конвейер. Приложение работает в бесшовной связке со специальным расширением для Google Chrome: вы заходите на страницу любой вакансии, нажимаете одну кнопку, а программа мгновенно анализирует требования, сопоставляет их с вашим резюме, отсеивает сомнительные предложения и пишет персонализированное сопроводительное письмо.
 
