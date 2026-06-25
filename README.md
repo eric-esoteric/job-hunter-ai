@@ -1,16 +1,22 @@
-<div align="center">
+<p align="center">
+  <!-- Сам логотип. Размер регулируй через width (в пикселях) -->
+  <img src="assets/logo.png" width="140" alt="Job Hunter AI Logo">
+</p>
 
-# 🎯 Job Hunter AI
+<h1 align="center">Job Hunter AI</h1>
 
-### **Персональный интеллектуальный ассистент по автоматизации карьеры**
+<p align="center">
+  <strong>Персональный интеллектуальный ассистент по автоматизации карьеры</strong>
+</p>
 
-[![Python Version](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org)
-[![Release](https://img.shields.io/badge/Release-v1.0.0-10B981?style=flat-square)](https://github.com/eric-esoteric/job-hunter-ai)
-[![License](https://img.shields.io/badge/License-Non--Commercial-crimson?style=flat-square)](license.txt)
+<p align="center">
+  <!-- Сюда вставь коды своих бейджиков (просто скопируй их из старой версии) -->
+  <img src="https://img.shields.io/badge/Python-3.10+-3670A0?style=flat&logo=python&logoColor=ffdd54" alt="Python">
+  <img src="https://img.shields.io/badge/Release-v1.1.0-00B981?style=flat" alt="Release">
+  <img src="https://img.shields.io/badge/License-Non--Commercial-EF4444?style=flat" alt="License">
+</p>
 
 ---
-
-</div>
 
 Job Hunter AI — это ваш персональный интеллектуальный ассистент, который превращает хаотичный поиск работы в упорядоченный автоматизированный конвейер. Приложение работает в бесшовной связке со специальным расширением для Google Chrome: вы заходите на страницу любой вакансии, нажимаете одну кнопку, а программа мгновенно анализирует требования, сопоставляет их с вашим резюме, отсеивает сомнительные предложения и пишет персонализированное сопроводительное письмо.
 
