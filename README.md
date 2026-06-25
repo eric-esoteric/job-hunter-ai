@@ -16,7 +16,7 @@
 
 ---
 
-# <img src="assets/logo.png" height="35" valign="middle"> Job Hunter AI
+# <img src="assets/logo.png" height="30" valign="middle"> Job Hunter AI
 
 **Job Hunter AI** — бесплатный ИИ-ассистент, который полностью автоматизирует рутину поиска работы: сам анализирует вакансии в браузере, отсеивает мусор и пишет идеальные отклики.
 
@@ -24,7 +24,7 @@
 
 <table width="100%">
   <tr>
-    <td width="60%" valign="top">
+    <td width="65%" valign="top">
       <h3>📌 Почему это мастхэв?</h3>
       <ul>
         <li>💰 <b>100% Бесплатно:</b> Работает через ваши личные API-ключи (включая бесплатный тариф Gemini).</li>
@@ -33,8 +33,8 @@
         <li>✍️ <b>Письмо в один клик:</b> Быстрая генерация сильного сопроводительного текста строго под боли работодателя.</li>
       </ul>
     </td>
-    <td width="40%" align="center" valign="middle">
-      <img src="assets/1.png" width="260" alt="Интерфейс Job Hunter AI">
+    <td width="35%" align="right" valign="middle">
+      <img src="assets/1.png" width="200" alt="Интерфейс Job Hunter AI">
     </td>
   </tr>
 </table>
@@ -45,46 +45,46 @@
 
 ## ✨ Ключевые фичи
 
-<table>
+<table width="100%">
   <!-- РЯД 1 -->
   <tr>
-    <td width="60%" valign="top">
+    <td width="65%" valign="top">
       <b>🎨 Современный High-DPI UI</b><br>
       Темная тема на CustomTkinter. Идеальная четкость на 2K/4K мониторах и полная поддержка горячих клавиш в русской раскладке.
       <br><br>
       <b>⚡ Интеграция с Chrome</b><br>
       Фирменное расширение считывает и передает данные вакансии в один клик. Никакого ручного копирования.
     </td>
-    <td width="40%" align="center" valign="middle">
-      <img src="assets/2.png" width="240" alt="Интерфейс и анализ">
+    <td width="35%" align="right" valign="middle">
+      <img src="assets/2.png" width="200" alt="Интерфейс и анализ">
     </td>
   </tr>
 
   <!-- РЯД 2 -->
   <tr>
-    <td width="60%" valign="top">
+    <td width="65%" valign="top">
       <b>⏳ Защита от блокировок (Очередь)</b><br>
       Потокобезопасная очередь с паузой в 15 секунд бережет лимиты ваших API-ключей (Rate Limits) от банов.
       <br><br>
       <b>🕵️‍♂️ 100% Невидимость</b><br>
       Пассивный сбор текста со страницы. Для алгоритмов карьерных сайтов вы остаетесь обычным пользователем.
     </td>
-    <td width="40%" align="center" valign="middle">
-      <img src="assets/3.png" width="240" alt="Очередь и безопасность">
+    <td width="35%" align="right" valign="middle">
+      <img src="assets/3.png" width="200" alt="Очередь и безопасность">
     </td>
   </tr>
   
   <!-- РЯД 3 -->
   <tr>
-    <td width="60%" valign="top">
+    <td width="65%" valign="top">
       <b>🎛️ Пульт управления Мульти-ИИ</b><br>
       Удобное переключение между провайдерами и гибкая настройка фильтров отбора прямо на главном экране.
       <br><br>
       <b>📋 Умный локальный журнал</b><br>
       История решений («Одобрено» / «Отклонено» с причиной) хранится в <code>%APPDATA%</code> с автоочисткой старых логов.
     </td>
-    <td width="40%" align="center" valign="middle">
-      <img src="assets/4.png" width="240" alt="Управление ИИ">
+    <td width="35%" align="right" valign="middle">
+      <img src="assets/4.png" width="200" alt="Управление ИИ">
     </td>
   </tr>
 </table>
@@ -92,7 +92,7 @@
 <br>
 
 <p align="center">
-  <img src="assets/6.png" width="220">&nbsp;&nbsp;&nbsp;&nbsp;<img src="assets/7.png" width="220">
+  <img src="assets/6.png" width="180">&nbsp;&nbsp;&nbsp;&nbsp;<img src="assets/7.png" width="180">
   <br><sub><i>Генератор писем (слева) и журнал результатов (справа)</i></sub>
 </p>
 
