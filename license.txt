@@ -1,6 +1,6 @@
 NON-COMMERCIAL LICENSE AGREEMENT
 Job Hunter AI — Software License
-Version 2.0.1
+Version 2.0.2
 
 ================================================================================
 

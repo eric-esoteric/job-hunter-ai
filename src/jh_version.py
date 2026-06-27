@@ -12,7 +12,7 @@
 """
 
 APP_NAME = "Job Hunter AI"
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 
 # Метаданные для свойств .exe в Windows
 COMPANY_NAME = "Job Hunter AI"

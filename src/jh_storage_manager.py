@@ -7,6 +7,24 @@ APPDATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), '
 
 _file_lock = threading.Lock()
 
+# In-memory URL caches — populated lazily on first dedup check, updated on every
+# write/delete so we never read the entire JSON file per-request.
+# None means "not yet built"; an empty set means "file is empty".
+_approved_url_cache: "set | None" = None
+_rejected_url_cache: "set | None" = None
+
+
+def _build_url_set_unlocked(filepath: str) -> set:
+    """Read URL set directly from a vacancy file. Caller must hold _file_lock."""
+    if not os.path.exists(filepath):
+        return set()
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {v.get("url") for v in data if v.get("url") and v.get("url") != "#"}
+    except Exception:
+        return set()
+
 # Автоматически создаем папку "Job Hunter AI" в AppData, если её ещё нет на компьютере.
 os.makedirs(APPDATA_DIR, exist_ok=True)
 
@@ -16,12 +34,36 @@ REJECTED_FILE = os.path.join(APPDATA_DIR, "rejected_vacancies.json")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "config.json")
 RESUMES_FILE = os.path.join(APPDATA_DIR, "resume_history.json")
 
+def _migrate_strip_description():
+    """
+    One-time startup migration: removes the 'description' (raw page text) field
+    from all approved vacancy records written by old sessions. Those sessions stored
+    document.body.innerText per record (up to several MB each), which made
+    _modify_file() hold _file_lock long enough to time out extension requests.
+    No-op when the file is already clean or does not exist.
+    Runs before any Flask/worker threads start, so no lock is needed.
+    """
+    if not os.path.exists(APPROVED_FILE):
+        return
+    try:
+        with open(APPROVED_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not any("description" in v for v in data):
+            return
+        cleaned = [{k: val for k, val in v.items() if k != "description"} for v in data]
+        with open(APPROVED_FILE, "w", encoding="utf-8") as f:
+            json.dump(cleaned, f, ensure_ascii=False, indent=4)
+        print(f"[Migration]: Removed 'description' from {len(cleaned)} approved vacancy records.")
+    except Exception as e:
+        print(f"[Migration]: Could not strip descriptions from approved file: {e}")
+
 def init_db():
     """Создает пустые файлы баз данных, если они отсутствуют."""
     if not os.path.exists(APPROVED_FILE):
         _save_file(APPROVED_FILE, [])
     if not os.path.exists(REJECTED_FILE):
         _save_file(REJECTED_FILE, [])
+    _migrate_strip_description()
 
 def _load_file(filepath):
     """Безопасно загружает данные из JSON файла (без блокировки — только для чтения)."""
@@ -211,22 +253,32 @@ def set_show_local_warning(value):
 
 def save_approved_vacancy(company, title, url, cover_letter="", description=""):
     """Атомарно добавляет новую одобренную ИИ вакансию в список."""
+    global _approved_url_cache
+    # description (raw page text) intentionally not stored — can be hundreds of KB
+    # per vacancy, is never read back from the file, and would make _modify_file()
+    # progressively slower with each new record, causing request timeouts at scale.
     new_vacancy = {
         "company": company,
         "title": title,
         "url": url,
-        "description": description,
         "cover_letter": cover_letter,
     }
     _modify_file(APPROVED_FILE, lambda data: data + [new_vacancy])
+    with _file_lock:
+        if _approved_url_cache is not None and url and url != "#":
+            _approved_url_cache.add(url)
 
 def save_rejected_vacancy(company, title, url, reason=""):
     """Атомарно добавляет отклоненную вакансию в журнал (макс 50 записей)."""
+    global _rejected_url_cache
     new_vacancy = {"company": company, "title": title, "url": url, "reason": reason}
     def _append_capped(data):
         data.append(new_vacancy)
         return data[-50:] if len(data) > 50 else data
     _modify_file(REJECTED_FILE, _append_capped)
+    with _file_lock:
+        if _rejected_url_cache is not None and url and url != "#":
+            _rejected_url_cache.add(url)
 
 def get_all_approved():
     """Возвращает список всех сохраненных вакансий."""
@@ -238,31 +290,57 @@ def get_all_rejected():
 
 def delete_vacancy_by_url(url):
     """Атомарно удаляет одобренную вакансию по URL."""
+    global _approved_url_cache
     _modify_file(APPROVED_FILE, lambda data: [v for v in data if v.get("url") != url])
+    with _file_lock:
+        if _approved_url_cache is not None:
+            _approved_url_cache.discard(url)
 
 def delete_rejected_by_url(url):
     """Атомарно удаляет отклоненную вакансию по URL."""
+    global _rejected_url_cache
     _modify_file(REJECTED_FILE, lambda data: [v for v in data if v.get("url") != url])
+    with _file_lock:
+        if _rejected_url_cache is not None:
+            _rejected_url_cache.discard(url)
 
 def clear_all_vacancies():
     """Атомарно очищает базу данных одобренных."""
+    global _approved_url_cache
     _modify_file(APPROVED_FILE, lambda _: [])
+    with _file_lock:
+        _approved_url_cache = None
 
 def clear_all_rejected():
     """Атомарно очищает базу данных отклоненных."""
+    global _rejected_url_cache
     _modify_file(REJECTED_FILE, lambda _: [])
+    with _file_lock:
+        _rejected_url_cache = None
 
 def vacancy_url_in_approved(url: str) -> bool:
-    """Проверяет наличие URL в одобренных вакансиях."""
+    """Проверяет наличие URL в одобренных вакансиях (O(1) через in-memory кеш)."""
+    global _approved_url_cache
     if not url or url == "#":
         return False
-    return any(v.get("url") == url for v in _load_file(APPROVED_FILE))
+    with _file_lock:
+        cache = _approved_url_cache
+        if cache is None:
+            _approved_url_cache = _build_url_set_unlocked(APPROVED_FILE)
+            cache = _approved_url_cache
+        return url in cache
 
 def vacancy_url_in_rejected(url: str) -> bool:
-    """Проверяет наличие URL в отклонённых вакансиях."""
+    """Проверяет наличие URL в отклонённых вакансиях (O(1) через in-memory кеш)."""
+    global _rejected_url_cache
     if not url or url == "#":
         return False
-    return any(v.get("url") == url for v in _load_file(REJECTED_FILE))
+    with _file_lock:
+        cache = _rejected_url_cache
+        if cache is None:
+            _rejected_url_cache = _build_url_set_unlocked(REJECTED_FILE)
+            cache = _rejected_url_cache
+        return url in cache
 
 def get_resume_history() -> list:
     """Возвращает список сохранённых резюме [{name, text}]."""

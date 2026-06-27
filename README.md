@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-3670A0?style=flat&logo=python&logoColor=ffdd54" alt="Python">
-  <img src="https://img.shields.io/badge/Release-v2.0.1-00B981?style=flat" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v2.0.2-00B981?style=flat" alt="Release">
   <img src="https://img.shields.io/badge/Platform-Windows-0078D4?style=flat&logo=windows" alt="Platform">
   <img src="https://img.shields.io/badge/License-Non--Commercial-EF4444?style=flat" alt="License">
 </p>
@@ -204,7 +204,16 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
 ## 🚀 Changelog
 
 <details>
-<summary><b>📦 v2.0.1 — Major Update (Current)</b></summary>
+<summary><b>📦 v2.0.2 — Bug Fix Release (Current)</b></summary>
+
+* **[Extension]** Fixed rapid-click capture: when clicking 30 vacancies within 5 seconds, only 5 were saved. Dedup checks read the entire JSON file per request under `_file_lock`. Replaced with O(1) in-memory URL caches, populated lazily and updated on every write/delete.
+* **[Thread Safety]** Cache globals are now guarded by `_file_lock` on every mutation (`.add()`, `.discard()`, `= None`). Local reference capture inside `with _file_lock:` eliminates a double-read race where a concurrent `clear_all_vacancies()` could reassign the global between two reads.
+* **[Storage]** Fixed queue fill-up and errors after ~11 approved vacancies. The full `document.body.innerText` (potentially several MB per page) was stored in every approved record. As the file grew, `_modify_file()` held `_file_lock` for over 8 seconds, timing out all extension requests. Removed the unused `description` field — AI analysis uses the in-memory request payload, not stored data.
+
+</details>
+
+<details>
+<summary><b>📦 v2.0.1 — Major Update</b></summary>
 
 * **[Architecture]** Global refactor with `jh_` prefix, unified `jh_version.py` module, Self-Healing build via `build_exe.py`.
 * **[i18n]** Full interface localization (EN / RU) via `jh_i18n.py` with dynamic switching.
@@ -276,6 +285,14 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
 
 </details>
 
+<details>
+<summary><b>🟢 v2.0.2 — Bug Fix Release (Done)</b></summary>
+
+- [x] Fixed extension rapid-click timeout: O(1) in-memory URL dedup caches with thread-safe mutations.
+- [x] Fixed queue fill-up after ~11 vacancies: removed unused `description` field from approved vacancy storage.
+
+</details>
+
 ---
 
 ## 🤝 Support the project
@@ -295,5 +312,5 @@ If the app helped you land a job — leave a star. It's free, and that's how goo
 ---
 
 <p align="center">
-  <sub>Made for people who value their time · Non-Commercial · v2.0.1</sub>
+  <sub>Made for people who value their time · Non-Commercial · v2.0.2</sub>
 </p>

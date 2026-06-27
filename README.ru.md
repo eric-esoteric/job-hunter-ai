@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-3670A0?style=flat&logo=python&logoColor=ffdd54" alt="Python">
-  <img src="https://img.shields.io/badge/Release-v2.0.1-00B981?style=flat" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v2.0.2-00B981?style=flat" alt="Release">
   <img src="https://img.shields.io/badge/Platform-Windows-0078D4?style=flat&logo=windows" alt="Platform">
   <img src="https://img.shields.io/badge/License-Non--Commercial-EF4444?style=flat" alt="License">
 </p>
@@ -204,7 +204,16 @@
 ## 🚀 История обновлений
 
 <details>
-<summary><b>📦 v2.0.1 — Большой апдейт (Текущая версия)</b></summary>
+<summary><b>📦 v2.0.2 — Фикс багов (Текущая версия)</b></summary>
+
+* **[Extension]** Фикс быстрого сбора: при клике на 30 вакансий за 5 секунд сохранялось только 5. Проверки дубликатов читали весь JSON-файл при каждом запросе под `_file_lock`. Заменено на O(1) in-memory кэши URL — ленивая инициализация, обновление при каждой записи/удалении.
+* **[Thread Safety]** Кэши глобальных переменных теперь защищены `_file_lock` при каждой мутации (`.add()`, `.discard()`, `= None`). Захват локальной ссылки внутри `with _file_lock:` устраняет double-read гонку, при которой конкурентный `clear_all_vacancies()` мог переназначить глобал между двумя чтениями.
+* **[Storage]** Фикс заполнения очереди и ошибок после ~11 одобренных вакансий. Полный текст страницы `document.body.innerText` (потенциально несколько МБ) сохранялся в поле `description` каждой одобренной записи. По мере роста файла `_modify_file()` удерживал `_file_lock` дольше 8 секунд, и все запросы расширения вылетали по таймауту. Поле `description` убрано из хранилища — ИИ-анализ работает с данными запроса в памяти, а не с файлом.
+
+</details>
+
+<details>
+<summary><b>📦 v2.0.1 — Большой апдейт</b></summary>
 
 * **[Architecture]** Глобальный рефакторинг с префиксом `jh_`, единый модуль `jh_version.py`, Self-Healing сборка через `build_exe.py`.
 * **[i18n]** Полная локализация интерфейса (EN / RU) через `jh_i18n.py` с динамическим переключением.
@@ -276,6 +285,14 @@
 
 </details>
 
+<details>
+<summary><b>🟢 v2.0.2 — Фикс багов (Реализовано)</b></summary>
+
+- [x] Фикс таймаута при быстрых кликах: O(1) in-memory кэши URL дедупликации с потокобезопасными мутациями.
+- [x] Фикс заполнения очереди после ~11 вакансий: убрано неиспользуемое поле `description` из хранилища одобренных.
+
+</details>
+
 ---
 
 ## 🤝 Поддержка проекта
@@ -295,5 +312,5 @@
 ---
 
 <p align="center">
-  <sub>Made for people who value their time · Non-Commercial · v2.0.1</sub>
+  <sub>Made for people who value their time · Non-Commercial · v2.0.2</sub>
 </p>
