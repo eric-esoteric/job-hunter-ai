@@ -45,6 +45,17 @@ def run_self_healing_refactor(script_dir):
             print("-> Удаляем дубликат main_app.py из корня...")
             os.remove(root_main)
 
+    # Переносим также jh_version.py (единый источник версии) из корня в src/, если он там.
+    root_version = os.path.join(script_dir, "jh_version.py")
+    if os.path.exists(root_version):
+        dest_version = os.path.join(src_dir, "jh_version.py")
+        if not os.path.exists(dest_version):
+            print("-> Переносим jh_version.py из корня в src/...")
+            shutil.move(root_version, dest_version)
+        else:
+            print("-> Удаляем дубликат jh_version.py из корня...")
+            os.remove(root_version)
+
     # 2. Переименовываем файлы внутри src/ в уникальные имена jh_*
     for old_name, new_name in rename_map.items():
         old_path = os.path.join(src_dir, old_name)
@@ -95,6 +106,150 @@ def run_self_healing_refactor(script_dir):
                 except Exception as e:
                     print(f"   [Ошибка рефакторинга] Не удалось обновить {file}: {e}")
 
+def read_app_version(script_dir):
+    """
+    Читает версию приложения из единого источника истины src/jh_version.py,
+    не импортируя весь модуль (чтобы не тянуть зависимости GUI при сборке).
+    Возвращает кортеж (version_string, (a, b, c, d)).
+    При любой ошибке безопасно откатывается на 1.2.0.
+    """
+    fallback_str = "1.2.0"
+    version_file = os.path.join(script_dir, "src", "jh_version.py")
+    version_str = fallback_str
+    try:
+        import re
+        with open(version_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        match = re.search(r'APP_VERSION\s*=\s*["\']([0-9]+(?:\.[0-9]+)*)["\']', content)
+        if match:
+            version_str = match.group(1)
+    except Exception as e:
+        print(f"[Версия]: Не удалось прочитать jh_version.py ({e}). Используем {fallback_str}.")
+
+    parts = []
+    for chunk in version_str.split("."):
+        chunk = chunk.strip()
+        parts.append(int(chunk) if chunk.isdigit() else 0)
+    while len(parts) < 4:
+        parts.append(0)
+    return version_str, tuple(parts[:4])
+
+
+def generate_version_file(script_dir):
+    """
+    Генерирует Windows VERSIONINFO-файл (version_info.txt) для PyInstaller.
+    Этот файл через аргумент --version-file запекает официальную версию прямо
+    в метаданные .exe: пользователь увидит её в Свойства -> Подробно, а также
+    она попадёт в строку версии деинсталлятора Windows.
+    Возвращает путь к созданному файлу или None при ошибке.
+    """
+    version_str, v = read_app_version(script_dir)
+    out_path = os.path.join(script_dir, "version_info.txt")
+
+    content = f"""# UTF-8
+# Автогенерируемый файл версии. Не редактировать вручную —
+# источник истины: src/jh_version.py (константа APP_VERSION).
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=({v[0]}, {v[1]}, {v[2]}, {v[3]}),
+    prodvers=({v[0]}, {v[1]}, {v[2]}, {v[3]}),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+woudl_placeholder
+      ]
+    ),
+    VarFileInfo([VarStruct(u'Translation', [1049, 1200])])
+  ]
+)
+"""
+    # Собираем StringTable аккуратно (без проблемных f-string вложений).
+    string_table = (
+        "        StringTable(\n"
+        "          u'041904b0',\n"
+        "          [\n"
+        "            StringStruct(u'CompanyName', u'Job Hunter AI'),\n"
+        "            StringStruct(u'FileDescription', u'Job Hunter AI - ассистент по автоматизации карьеры'),\n"
+        f"            StringStruct(u'FileVersion', u'{version_str}'),\n"
+        "            StringStruct(u'InternalName', u'JobHunterAI'),\n"
+        "            StringStruct(u'LegalCopyright', u'(c) Job Hunter AI'),\n"
+        "            StringStruct(u'OriginalFilename', u'Job Hunter AI.exe'),\n"
+        "            StringStruct(u'ProductName', u'Job Hunter AI'),\n"
+        f"            StringStruct(u'ProductVersion', u'{version_str}')\n"
+        "          ]\n"
+        "        )\n"
+    )
+    content = content.replace("woudl_placeholder", string_table.rstrip("\n"))
+
+    try:
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"[Версия]: Сгенерирован version_info.txt с версией {version_str} -> {v}")
+        return out_path
+    except Exception as e:
+        print(f"[Версия]: Не удалось записать version_info.txt: {e}")
+        return None
+
+
+def try_run_inno_setup(script_dir):
+    """
+    Пытается запустить компилятор Inno Setup (ISCC.exe) для создания установщика.
+    Ищет ISCC.exe в системном PATH и в стандартных папках установки Inno Setup.
+    Вызывается автоматически после успешной сборки PyInstaller.
+    """
+    iscc_path = shutil.which("ISCC.exe") or shutil.which("ISCC")
+    if not iscc_path:
+        for candidate in [
+            r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            r"C:\Program Files\Inno Setup 6\ISCC.exe",
+            r"C:\Program Files (x86)\Inno Setup 5\ISCC.exe",
+            r"C:\Program Files\Inno Setup 5\ISCC.exe",
+        ]:
+            if os.path.exists(candidate):
+                iscc_path = candidate
+                break
+
+    if not iscc_path:
+        print("\n[Inno Setup]: ISCC.exe не найден в PATH и стандартных папках установки.")
+        print("              Установите Inno Setup (https://jrsoftware.org/isinfo.php) или")
+        print("              добавьте путь к ISCC.exe в переменную окружения PATH,")
+        print("              чтобы установщик собирался автоматически.")
+        return
+
+    iss_file = os.path.join(script_dir, "installer.iss")
+    if not os.path.exists(iss_file):
+        print(f"\n[Inno Setup]: Файл installer.iss не найден в {script_dir}. Пропускаем.")
+        return
+
+    print(f"\n[Inno Setup]: Компилятор найден: {iscc_path}")
+    print(f"[Inno Setup]: Запуск компиляции установщика из {iss_file}...")
+    inno_result = subprocess.run(
+        [iscc_path, iss_file],
+        capture_output=True,
+        text=True,
+        cwd=script_dir
+    )
+
+    if inno_result.returncode == 0:
+        setup_exe = os.path.join(script_dir, "JobHunterAI_Setup.exe")
+        print("[Inno Setup]: ✓ Установщик успешно создан!")
+        if os.path.exists(setup_exe):
+            print(f"              Файл: {setup_exe}")
+    else:
+        print("[Inno Setup]: ✗ Ошибка при компиляции установщика!")
+        if inno_result.stdout:
+            print(inno_result.stdout)
+        if inno_result.stderr:
+            print(inno_result.stderr)
+
+
 def install_and_compile():
     # Автоматическое определение папки, где физически находится этот скрипт build_exe.py
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -130,7 +285,10 @@ def install_and_compile():
         return
 
     print("\n[3/4] Запуск компиляции через PyInstaller...")
-    
+
+    # Генерируем файл версии Windows для запекания в метаданные .exe.
+    version_file_path = generate_version_file(script_dir)
+
     cmd = [
         sys.executable,
         "-m",
@@ -152,6 +310,12 @@ def install_and_compile():
         cmd.append(f"--add-data={logo_file}{os.path.pathsep}.")
     else:
         print("[Предупреждение]: Файл logo.png не найден в корне.")
+
+    # Запекаем версию Windows в метаданные exe (свойства файла / деинсталлятор).
+    if version_file_path and os.path.exists(version_file_path):
+        cmd.append(f"--version-file={version_file_path}")
+    else:
+        print("[Предупреждение]: version_info.txt не сгенерирован — версия в свойствах .exe будет отсутствовать.")
 
     # Добавляем целевой скрипт в сборку
     cmd.append(main_script)
@@ -207,11 +371,18 @@ def install_and_compile():
         spec_file = os.path.join(script_dir, "main_app.spec")
         if os.path.exists(spec_file):
             os.remove(spec_file)
+        # Удаляем временный автогенерируемый файл версии.
+        vinfo = os.path.join(script_dir, "version_info.txt")
+        if os.path.exists(vinfo):
+            os.remove(vinfo)
         
         print("\n==================================================")
         print(" СБОРКА И АВТОПЕРЕНОС УСПЕШНО ЗАВЕРШЕНЫ!")
         print(f" Все файлы подготовлены в папке: {target_dir}")
         print("==================================================")
+
+        # Пробуем автоматически собрать установщик через Inno Setup
+        try_run_inno_setup(script_dir)
 
     except Exception as err:
         print(f"\n[Ошибка автопереноса/очистки]: {err}")

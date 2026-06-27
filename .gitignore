@@ -1,15 +1,161 @@
-# Настройки и ключи 
+# ============================================================
+# SECURITY — KEYS & SECRETS (never commit these)
+# ============================================================
 .env
-config.json
-*.local
+.env.*
+!.env.example
+*.env
+secrets.json
+secrets.yaml
+secrets.yml
+config/secrets.*
+**/secrets/**
 
-# Папки сборщика и виртуального окружения
+# API keys, tokens, credentials
+*.key
+*.pem
+*.p12
+*.pfx
+*.cer
+*.crt
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.asc
+
+# ============================================================
+# PYTHON
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
 venv/
-node_modules/
-dist/
-build/
-*.exe
+env/
+ENV/
+.env/
+.python-version
+Pipfile.lock
+poetry.lock
 
-# Локальная база данных (журналы CRM)
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+pip-wheel-metadata/
+MANIFEST
+
+# Testing & coverage
+.pytest_cache/
+.tox/
+.coverage
+coverage.xml
+*.cover
+htmlcov/
+
+# Type checkers & linters
+.mypy_cache/
+.dmypy.json
+.ruff_cache/
+
+# PyInstaller build artifacts
+*.spec.bak
+*.manifest
+build_output/
+
+# ============================================================
+# JAVASCRIPT / CHROME EXTENSION
+# ============================================================
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.npm/
+*.min.js.map
+
+# Extension build artifacts
+extension/dist/
+extension/build/
+
+# ============================================================
+# APP DATA & USER FILES (может содержать личные данные)
+# ============================================================
 *.db
+*.sqlite
+*.sqlite3
+user_data/
+data/
+logs/
 *.log
+*.log.*
+
+# Конфигурационные файлы с данными пользователя
+config.json
+config.yaml
+config.yml
+settings.json
+user_settings.*
+profile.json
+
+# ============================================================
+# COMPILED / BINARY ARTIFACTS
+# ============================================================
+*.exe
+*.msi
+*.dll
+dist/
+output/
+
+# ============================================================
+# OS FILES
+# ============================================================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+
+# ============================================================
+# EDITORS & IDEs
+# ============================================================
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.sublime-workspace
+.history/
+
+# ============================================================
+# MISC
+# ============================================================
+*.bak
+*.tmp
+*.swp
+*.swo
+*.orig
+*.rej
+.cache/

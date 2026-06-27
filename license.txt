@@ -1,22 +1,193 @@
-ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ (ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ)
-Приложение: Job Hunter AI v1.0
+NON-COMMERCIAL LICENSE AGREEMENT
+Job Hunter AI — Software License
+Version 2.0.1
 
-Пожалуйста, внимательно ознакомьтесь со следующими условиями перед установкой и использованием программного обеспечения Job Hunter AI (далее — "Программа").
+================================================================================
 
-Установка и запуск Программы означает ваше полное и безоговорочное согласие со всеми пунктами настоящего соглашения. Если вы не согласны с какими-либо условиями, не устанавливайте и не используйте Программу.
+PLEASE READ THIS LICENSE AGREEMENT CAREFULLY BEFORE INSTALLING OR USING THE
+SOFTWARE. BY INSTALLING, COPYING, OR OTHERWISE USING JOB HUNTER AI, YOU
+ACKNOWLEDGE THAT YOU HAVE READ THIS AGREEMENT, UNDERSTAND IT, AND AGREE TO BE
+BOUND BY ITS TERMS AND CONDITIONS.
 
-СТАТУС ПО И ОТКРЫТЫЙ ИСХОДНЫЙ КОД
-1.1. Данная Программа является свободным программным обеспечением с открытым исходным кодом (Open Source).
-1.2. Исходный код Программы предоставляется для ознакомления, аудита безопасности и самостоятельной модификации.
+IF YOU DO NOT AGREE TO THESE TERMS, DO NOT INSTALL OR USE THE SOFTWARE.
 
-НЕКОММЕРЧЕСКОЕ ИСПОЛЬЗОВАНИЕ
-2.1. Программа предназначена ИСКЛЮЧИТЕЛЬНО для личного, домашнего и некоммерческого использования соискателями.
-2.2. Запрещается любая продажа Программы, аренда, сублицензирование, а также использование её в коммерческих целях кадровыми агентствами, рекрутинговыми сервисами или иными юридическими лицами без предварительного письменного согласия автора.
+================================================================================
 
-ОТКАЗ ОТ ГАРАНТИЙ И ОГРАНИЧЕНИЕ ОТВЕТСТВЕННОСТИ
-3.1. ПРОГРАММА ПРЕДОСТАВЛЯЕТСЯ НА УСЛОВИЯХ "КАК ЕСТЬ" ("AS IS"). Автор не дает никаких явных или подразумеваемых гарантий работоспособности Программы, её соответствия вашим ожиданиям или бесперебойной работы.
-3.2. ИИ-анализ вакансий и генерация писем производятся сторонней языковой моделью Gemini (Google). Автор не несет ответственности за качество, точность, корректность и уместность сгенерированного искусственным интеллектом текста. Вы обязаны самостоятельно проверять все письма перед отправкой работодателю.
-3.3. Автор не несет ответственности за любые прямые или косвенные убытки, включая, но не ограничиваясь: блокировкой ваших аккаунтов на сайтах по поиску работы (например, hh.ru и др.), потерей данных, упущенной выгодой или неполучением предложения о работе (оффера). Вы используете автоматизацию на свой собственный страх и риск.
+1. DEFINITIONS
 
-ИЗМЕНЕНИЕ И ОБНОВЛЕНИЕ СОГЛАШЕНИЯ
-4.1. Автор оставляет за собой право изменять условия данного соглашения в одностороннем порядке при выпуске обновлений Программы.
+   "Software" refers to Job Hunter AI, including all source code, compiled
+   executables, documentation, assets, Chrome extension components, and any
+   future updates or patches released under this license.
+
+   "Author" refers to the original creator and copyright holder of the Software.
+
+   "User" refers to any individual or entity that installs, runs, or otherwise
+   interacts with the Software.
+
+   "Commercial Use" means any use of the Software, in whole or in part, intended
+   for or directed toward commercial advantage or monetary compensation, including
+   but not limited to: integration into paid services, resale, sublicensing,
+   white-labeling, use within staffing agencies or recruiting platforms, or
+   deployment as a feature of a commercial product.
+
+================================================================================
+
+2. GRANT OF LICENSE
+
+   Subject to the terms of this Agreement, the Author grants the User a
+   personal, non-exclusive, non-transferable, royalty-free license to:
+
+   2.1. Download, install, and run the Software on personal devices for
+        personal, non-commercial job-seeking purposes.
+
+   2.2. Inspect and audit the source code for personal understanding and
+        security verification.
+
+   2.3. Modify the source code for personal use, provided that modified
+        versions are not distributed publicly or used commercially.
+
+================================================================================
+
+3. RESTRICTIONS
+
+   The following uses are expressly prohibited without prior written consent
+   from the Author:
+
+   3.1. Commercial Use — The Software may not be used, integrated, resold, or
+        deployed in any commercial context. This includes but is not limited to:
+        recruitment agencies, HR platforms, job matching services, SaaS products,
+        or any service that charges end users directly or indirectly.
+
+   3.2. Redistribution — The Software may not be redistributed, repackaged,
+        or published on third-party platforms (app stores, download portals,
+        mirror sites) without explicit written authorization from the Author.
+
+   3.3. Sublicensing — The User may not sublicense, sell, rent, lease, or
+        transfer any rights granted under this Agreement to any third party.
+
+   3.4. Removal of Notices — The User may not remove, alter, or obscure any
+        copyright notices, license headers, or attribution text included in
+        the Software or its source code.
+
+================================================================================
+
+4. AI PROVIDERS AND THIRD-PARTY SERVICES
+
+   4.1. The Software integrates with third-party AI providers including but not
+        limited to Google Gemini, OpenAI, Anthropic Claude, DeepSeek, Ollama,
+        and LM Studio. Use of these services is subject to each provider's own
+        Terms of Service and Privacy Policy.
+
+   4.2. The Author does not guarantee the availability, accuracy, quality, or
+        appropriateness of any content generated by AI models. All AI-generated
+        text — including cover letters, job analysis results, and filtering
+        decisions — must be reviewed and verified by the User before use.
+
+   4.3. The User is solely responsible for obtaining and securing any API keys
+        required to use cloud-based AI providers. The Author accepts no
+        responsibility for unauthorized access resulting from the User's failure
+        to protect their credentials.
+
+   4.4. The Author is not affiliated with, endorsed by, or partnered with any
+        third-party AI provider named in this Software or its documentation.
+
+================================================================================
+
+5. DISCLAIMER OF WARRANTIES
+
+   THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE," WITHOUT WARRANTY OF
+   ANY KIND, EXPRESS OR IMPLIED. TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE
+   LAW, THE AUTHOR EXPRESSLY DISCLAIMS ALL WARRANTIES, INCLUDING BUT NOT
+   LIMITED TO:
+
+   — IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+   — WARRANTIES THAT THE SOFTWARE WILL MEET THE USER'S REQUIREMENTS
+   — WARRANTIES THAT OPERATION OF THE SOFTWARE WILL BE UNINTERRUPTED OR
+     ERROR-FREE
+   — WARRANTIES REGARDING THE ACCURACY OR RELIABILITY OF ANY AI-GENERATED
+     OUTPUT
+
+   The Author makes no representation that the Software's filtering logic will
+   correctly identify scam, MLM, or otherwise unsuitable job listings in all
+   cases. Job market conditions, listing formats, and employer practices vary
+   widely. Filtering results are probabilistic, not guaranteed.
+
+================================================================================
+
+6. LIMITATION OF LIABILITY
+
+   TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE
+   AUTHOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR
+   EXEMPLARY DAMAGES ARISING OUT OF OR IN CONNECTION WITH THE USE OR INABILITY
+   TO USE THE SOFTWARE, INCLUDING BUT NOT LIMITED TO:
+
+   6.1. Suspension or permanent banning of the User's accounts on job boards
+        or employment platforms (including but not limited to hh.ru, LinkedIn,
+        HeadHunter, Indeed, or similar services) as a result of automated
+        activity.
+
+   6.2. Loss of employment opportunities, missed job offers, or career-related
+        outcomes of any kind.
+
+   6.3. Data loss, corruption of user files, or damage to the User's computing
+        environment.
+
+   6.4. Inaccurate, inappropriate, or misleading AI-generated content sent
+        to prospective employers.
+
+   6.5. Any financial or reputational harm resulting from reliance on the
+        Software's output.
+
+   THE USER ASSUMES FULL RESPONSIBILITY FOR ALL RISKS ASSOCIATED WITH THE USE
+   OF AUTOMATED JOB SEARCH TOOLING.
+
+================================================================================
+
+7. AUTOMATION AND PLATFORM TERMS OF SERVICE
+
+   The User acknowledges that automated interaction with job boards and
+   employment platforms may violate those platforms' own Terms of Service.
+   The Author does not endorse, encourage, or take responsibility for any
+   use of the Software that violates third-party platform rules. The User
+   is solely responsible for ensuring their use of the Software complies
+   with all applicable platform policies, laws, and regulations.
+
+================================================================================
+
+8. MODIFICATIONS TO THIS AGREEMENT
+
+   The Author reserves the right to modify the terms of this Agreement at
+   any time. Updated license terms will be distributed with new releases of
+   the Software. Continued use of the Software after a new version is
+   published constitutes acceptance of the revised terms.
+
+   Users who do not agree with updated terms should discontinue use of the
+   Software and uninstall it from their devices.
+
+================================================================================
+
+9. GOVERNING LAW
+
+   This Agreement shall be interpreted in accordance with generally accepted
+   principles of software licensing law. In the event of a dispute, the parties
+   agree to seek resolution through good-faith negotiation before pursuing any
+   formal legal remedy.
+
+================================================================================
+
+10. CONTACT
+
+    For commercial licensing inquiries, permission requests, or other legal
+    matters related to this Software, contact the Author at:
+
+    Email: teammudlo@gmail.com
+    GitHub: https://github.com/eric-esoteric
+
+================================================================================
+
+Copyright (c) 2024–2026 Eric Esoteric. All rights reserved.
+
+No part of this Software may be used for commercial purposes without the
+express written consent of the copyright holder.
+
+================================================================================

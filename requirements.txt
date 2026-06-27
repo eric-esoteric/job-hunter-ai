@@ -1,3 +1,5 @@
 customtkinter
-flask
-flask_cors
+Flask
+flask-cors
+Pillow
+plyer

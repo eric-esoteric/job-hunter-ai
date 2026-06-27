@@ -4,10 +4,29 @@ import sys
 import webbrowser
 import customtkinter as ctk
 import jh_storage_manager as storage_manager
+import jh_i18n
+from jh_i18n import tr
 from tkinter import messagebox
+
+from PIL import Image
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ICON_PATH = os.path.join(BASE_DIR, "icon.ico")
+LOGO_PNG_PATH = os.path.join(BASE_DIR, "logo.png")
+
+
+def _load_logo_image(height_px=22):
+    try:
+        source = LOGO_PNG_PATH if os.path.exists(LOGO_PNG_PATH) else (ICON_PATH if os.path.exists(ICON_PATH) else None)
+        if not source:
+            return None
+        img = Image.open(source)
+        aspect = img.width / img.height
+        w = int(height_px * aspect)
+        img = img.resize((w, height_px), Image.Resampling.LANCZOS)
+        return ctk.CTkImage(light_image=img, dark_image=img, size=(w, height_px))
+    except Exception:
+        return None
 
 COLOR_BG_DARK = "#090D14"       # Мягкий глубокий темный космос
 COLOR_CARD_BG = "#111622"       # Спокойный сине-серый фон карточек
@@ -34,55 +53,136 @@ def force_dark_title_bar(window):
     except Exception:
         pass
 
-def set_window_icon(window):
-    """Безопасная установка иконки программы"""
-    try:
-        if os.path.exists(ICON_PATH):
-            window.after(200, lambda: window.iconbitmap(ICON_PATH))
-        else:
-            window.after(200, lambda: window.iconbitmap(sys.executable))
-    except Exception:
-        pass
-
-def center_window(window, width, height, parent=None):
-    """Абсолютно стабильное центрирование без мерцания за счет альфа-канала."""
+def _show_with_icon(window, width, height, parent=None, grab=False):
+    """
+    Shows a CTkToplevel with proper Windows icon support.
+    Pattern: alpha=0 → geometry → deiconify (HWND created) → after(50): icon + alpha=1.
+    Call this from window.after(80+, ...) so all UI widgets are already packed.
+    """
+    if not window.winfo_exists():
+        return
     try:
         window.attributes("-alpha", 0.0)
     except Exception:
         pass
-    
+    try:
+        window.update_idletasks()
+        try:
+            sc = window._get_window_scaling()
+        except Exception:
+            sc = 1.0
+        # width/height логические → физические для арифметики центрирования
+        child_phys_w = width * sc
+        child_phys_h = height * sc
+        # winfo_* возвращают физические пиксели; x/y передаём в geometry() тоже физическими
+        if parent and parent.winfo_exists():
+            px = parent.winfo_rootx()
+            py = parent.winfo_rooty()
+            pw = parent.winfo_width()
+            ph = parent.winfo_height()
+            x = int(px + (pw - child_phys_w) / 2)
+            y = int(py + (ph - child_phys_h) / 2)
+        else:
+            x = int((window.winfo_screenwidth() - child_phys_w) / 2)
+            y = int((window.winfo_screenheight() - child_phys_h) / 2)
+        # width/height — логические (CTk умножит на sc); x/y — физические (CTk не трогает)
+        window.geometry(f"{width}x{height}+{max(0, x)}+{max(0, y)}")
+    except Exception:
+        window.geometry(f"{width}x{height}")
+    window.deiconify()
+    if grab:
+        window.grab_set()
+    window.focus_force()
+
+    def _apply_icon():
+        """Применяет иконку через iconbitmap + Win32 API. Вызывается дважды."""
+        if not window.winfo_exists():
+            return
+        if not os.path.exists(ICON_PATH):
+            return
+        try:
+            window.iconbitmap(ICON_PATH)
+        except Exception:
+            pass
+        try:
+            import ctypes
+            # GA_ROOT(2) поднимается по цепочке родителей до корневого окна —
+            # надёжно работает даже когда CTkToplevel вложен в другой CTkToplevel.
+            GA_ROOT = 2
+            hwnd = ctypes.windll.user32.GetAncestor(window.winfo_id(), GA_ROOT)
+            if not hwnd:
+                hwnd = ctypes.windll.user32.GetParent(window.winfo_id()) or window.winfo_id()
+            LR_LOADFROMFILE, LR_DEFAULTSIZE, IMAGE_ICON, WM_SETICON = 0x0010, 0x0040, 1, 0x0080
+            icon_big = ctypes.windll.user32.LoadImageW(
+                None, ICON_PATH, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE
+            )
+            icon_small = ctypes.windll.user32.LoadImageW(
+                None, ICON_PATH, IMAGE_ICON, 16, 16, LR_LOADFROMFILE
+            )
+            if icon_big:
+                ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 1, icon_big)
+            if icon_small:
+                ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 0, icon_small)
+        except Exception:
+            pass
+
+    def _finalize():
+        if not window.winfo_exists():
+            return
+        _apply_icon()
+        try:
+            window.attributes("-alpha", 1.0)
+        except Exception:
+            pass
+        # Повторное применение на случай если CTk сбросил иконку в своих after()-коллбэках
+        window.after(350, _apply_icon)
+
+    window.after(100, _finalize)
+
+def center_window(window, width, height, parent=None):
+    """
+    Центрирует окно без мерцания (alpha=0 → geometry → alpha=1).
+
+    Координатная модель CustomTkinter + DPI-aware Windows:
+      • winfo_* — физические пиксели.
+      • geometry("WxH+X+Y"): CTk масштабирует W и H, но X/Y передаёт ОС как есть.
+      Формула: переводим логические w/h в физические (× sc), считаем X/Y
+      в физических пикселях, передаём в geometry() без изменений.
+    """
+    try:
+        window.attributes("-alpha", 0.0)
+    except Exception:
+        pass
+
     def _apply_centered_position():
         if not window.winfo_exists():
             return
         try:
             window.update_idletasks()
             try:
-                scaling = window._get_window_scaling()
+                sc = window._get_window_scaling()
             except Exception:
-                scaling = 1.0
+                sc = 1.0
 
-            scaled_width = int(width * scaling)
-            scaled_height = int(height * scaling)
-            
+            # Логические размеры → физические для арифметики центрирования
+            child_phys_w = width * sc
+            child_phys_h = height * sc
+
             if parent and parent.winfo_exists():
-                parent_x = parent.winfo_x()
-                parent_y = parent.winfo_y()
-                parent_w = parent.winfo_width()
-                parent_h = parent.winfo_height()
-                
-                x = parent_x + (parent_w - scaled_width) // 2
-                y = parent_y + (parent_h - scaled_height) // 2
+                px = parent.winfo_rootx()
+                py = parent.winfo_rooty()
+                pw = parent.winfo_width()
+                ph = parent.winfo_height()
+                x = int(px + (pw - child_phys_w) / 2)
+                y = int(py + (ph - child_phys_h) / 2)
             else:
-                screen_width = window.winfo_screenwidth()
-                screen_height = window.winfo_screenheight()
-                
-                x = (screen_width - scaled_width) // 2
-                y = (screen_height - scaled_height) // 2
-            
-            x = max(0, int(x))
-            y = max(0, int(y))
-            
-            window.geometry(f"{width}x{height}+{x}+{y}")
+                sw = window.winfo_screenwidth()
+                sh = window.winfo_screenheight()
+                x = int((sw - child_phys_w) / 2)
+                y = int((sh - child_phys_h) / 2)
+
+            # width/height — логические (CTk умножит на sc); x/y — физические (CTk не трогает)
+            window.geometry(f"{width}x{height}+{max(0, x)}+{max(0, y)}")
         except Exception as e:
             print(f"[Резервное центрирование]: {e}")
             window.geometry(f"{width}x{height}")
@@ -92,7 +192,7 @@ def center_window(window, width, height, parent=None):
                 window.deiconify()
             except Exception:
                 pass
-        
+
     window.after(15, _apply_centered_position)
 
 def bind_russian_hotkeys(widget):
@@ -215,29 +315,43 @@ def open_browser_link(url):
         try:
             webbrowser.open(url)
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось открыть ссылку: {e}")
+            messagebox.showerror("Error", tr("link_error", e=e))
     else:
-        messagebox.showinfo("Информация", "Ссылка на вакансию отсутствует.")
+        messagebox.showinfo("Info", tr("no_link"))
 
 def open_window(parent_window):
     """Создает независимое окно со списком одобренных и отклоненных вакансий"""
+    jh_i18n.set_language(storage_manager.load_config().get("language", "en"))
+
     window = ctk.CTkToplevel(parent_window)
     window.withdraw()
-    window.title("Результаты анализа ИИ")
+    window.title(tr("results_title"))
     window.configure(fg_color=COLOR_BG_DARK)
     
     force_dark_title_bar(window)
-    set_window_icon(window)
-    
-    center_window(window, 680, 750, parent_window)
-    
-    # Фикс: Полностью удален window.grab_set(). Теперь окно результатов не является
-    # модальным, не зажимает системную очередь сообщений и не фризит таймер главного окна.
-    window.focus()
+    # Window is shown at the end via _show_with_icon — all UI must be packed first.
 
     window.last_approved_count = -1
     window.last_rejected_count = -1
     window.current_tab = "APPROVED"
+
+    # Реестры уже отрисованных карточек по уникальному ключу (url).
+    # Нужны для дифференциального обновления без полного destroy() всего фрейма,
+    # что устраняет мерцание и сброс позиции скролла.
+    # Структура: { url: {"card": <CTkFrame>, "data": <dict с данными вакансии>} }
+    window.approved_cards = {}
+    window.rejected_cards = {}
+    # Ссылки на лейблы-заглушки "список пуст", чтобы корректно их показывать/прятать.
+    window.approved_empty_lbl = None
+    window.rejected_empty_lbl = None
+    # Кэш последних применённых значений UI-виджетов. Нужен, чтобы НЕ дёргать
+    # .configure() на каждом тике таймера: повторный configure сбрасывает внутренний
+    # hover-статус CustomTkinter (кнопка "тухнет" под курсором) и заставляет
+    # CTkSegmentedButton перестраивать дочерние кнопки (визуальная вспышка).
+    # Перерисовываем виджет только когда его реальное значение изменилось.
+    window.last_clear_btn_state = None      # "normal" | "disabled"
+    window.last_tab_values = None           # tuple подписей сегментов
+    window.last_tab_selected = None         # выбранная подпись сегмента
 
     scroll_frame_approved = ctk.CTkScrollableFrame(window, width=640, height=640, fg_color=COLOR_BG_DARK)
     scroll_frame_rejected = ctk.CTkScrollableFrame(window, width=640, height=640, fg_color=COLOR_BG_DARK)
@@ -245,27 +359,86 @@ def open_window(parent_window):
     speed_up_scroll_frame(scroll_frame_approved)
     speed_up_scroll_frame(scroll_frame_rejected)
 
+    logo_header = ctk.CTkFrame(window, fg_color="transparent")
+    logo_header.pack(pady=(10, 0), padx=15)
+    _logo = _load_logo_image(22)
+    if _logo:
+        ctk.CTkLabel(logo_header, image=_logo, text="").pack(side="left", padx=(0, 8))
+    ctk.CTkLabel(
+        logo_header,
+        text="JOB HUNTER AI",
+        font=("Arial", 14, "bold"),
+        text_color=COLOR_CYAN_NEON
+    ).pack(side="left")
+
     controls_header = ctk.CTkFrame(window, fg_color="transparent")
-    controls_header.pack(pady=(12, 4), padx=15, fill="x")
+    controls_header.pack(pady=(4, 4), padx=15, fill="x")
 
     controls_header.columnconfigure(0, weight=1, uniform="side_cols")
     controls_header.columnconfigure(1, weight=2, uniform="mid_col")
     controls_header.columnconfigure(2, weight=1, uniform="side_cols")
 
     status_indicator = ctk.CTkLabel(
-        controls_header, 
-        text="● Мониторинг ИИ", 
-        font=("Arial", 11, "bold"), 
+        controls_header,
+        text="",
+        font=("Arial", 11, "bold"),
         text_color=COLOR_CYAN_NEON,
         anchor="w"
     )
     status_indicator.grid(row=0, column=0, sticky="w")
 
+    # Динамический индикатор: мигает при активном ассистенте, статичен иначе.
+    _blink_dots = ("●", "○")
+    _blink_idx = [0]
+    _monitor_timer = [None]  # Track timer ID so we can cancel on window destroy
+
+    def _update_monitoring():
+        if not window.winfo_exists():
+            return
+        base = tr("monitoring")
+        try:
+            is_active = parent_window.is_active
+            is_paused = getattr(parent_window, "_paused_mode", False)
+        except Exception:
+            is_active = False
+            is_paused = False
+
+        if is_active:
+            dot = _blink_dots[_blink_idx[0] % 2]
+            _blink_idx[0] += 1
+            color = COLOR_CYAN_NEON
+            delay = 1200
+        elif is_paused:
+            dot = "◐"
+            color = COLOR_GOLD
+            delay = 2000
+        else:
+            dot = "○"
+            color = COLOR_RED
+            delay = 2000
+
+        try:
+            status_indicator.configure(text=f"{dot} {base}", text_color=color)
+        except Exception:
+            return
+        _monitor_timer[0] = window.after(delay, _update_monitoring)
+
+    def _on_results_close():
+        if _monitor_timer[0] is not None:
+            try:
+                window.after_cancel(_monitor_timer[0])
+            except Exception:
+                pass
+        window.destroy()
+
+    window.protocol("WM_DELETE_WINDOW", _on_results_close)
+    window.after(50, _update_monitoring)
+
     def clear_all():
         if window.current_tab == "APPROVED":
             ans = messagebox.askyesno(
-                "Очистка базы данных", 
-                "Вы уверены, что хотите безвозвратно удалить ВСЕ одобренные вакансии из списка?",
+                tr("clear_title"),
+                tr("clear_approved_q"),
                 parent=window
             )
             if ans:
@@ -273,22 +446,22 @@ def open_window(parent_window):
                 refresh_list(force=True)
         else:
             ans = messagebox.askyesno(
-                "Очистка базы данных", 
-                "Вы уверены, что хотите очистить весь журнал отклоненных вакансий?",
+                tr("clear_title"),
+                tr("clear_rejected_q"),
                 parent=window
             )
             if ans:
                 storage_manager.clear_all_rejected()
                 refresh_list(force=True)
-        
+
         window.lift()
         window.focus_force()
 
     btn_clear_all = ctk.CTkButton(
-        controls_header, 
-        text="🗑️ Очистить список", 
-        fg_color=COLOR_INPUT_BG, 
-        hover_color=COLOR_RED, 
+        controls_header,
+        text=tr("btn_clear"),
+        fg_color=COLOR_INPUT_BG,
+        hover_color=COLOR_RED,
         text_color=COLOR_TEXT_LIGHT,
         font=("Arial", 11, "bold"),
         height=32,
@@ -298,38 +471,56 @@ def open_window(parent_window):
     )
     btn_clear_all.grid(row=0, column=2, sticky="e")
 
+    # Кэш текущих подписей вкладок для language-independent детекции нажатия.
+    # Сравниваем value == window._tab_approved_text, не ищем подстроку.
+    window._tab_approved_text = tr("tab_approved", n=0)
+    window._tab_rejected_text = tr("tab_rejected", n=0)
+
     def segment_changed(value):
-        if "Одобренные" in value:
+        window.last_tab_selected = value
+        # Сравниваем по префиксу до первого "(" — счётчик меняется, основной текст нет.
+        approved_prefix = window._tab_approved_text.split("(")[0]
+        if value.startswith(approved_prefix):
             window.current_tab = "APPROVED"
             scroll_frame_rejected.pack_forget()
             scroll_frame_approved.pack(pady=(5, 5), padx=15, fill="both", expand=True)
             try:
                 scroll_frame_approved._parent_canvas.yview_moveto(0)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Results UI]: yview_moveto (approved) пропущен: {e}")
         else:
             window.current_tab = "REJECTED"
             scroll_frame_approved.pack_forget()
             scroll_frame_rejected.pack(pady=(5, 5), padx=15, fill="both", expand=True)
             try:
                 scroll_frame_rejected._parent_canvas.yview_moveto(0)
-            except Exception:
-                pass
-            
+            except Exception as e:
+                print(f"[Results UI]: yview_moveto (rejected) пропущен: {e}")
+
         refresh_list(force=False)
 
     tab_segment = ctk.CTkSegmentedButton(
-        controls_header, 
-        values=["Одобренные ИИ 👍", "Отклоненные ИИ ✕"], 
-        font=("Arial", 11, "bold"), 
+        controls_header,
+        values=[tr("tab_approved", n=0), tr("tab_rejected", n=0)],
+        font=("Arial", 11, "bold"),
         command=segment_changed,
-        selected_color=COLOR_GOLD, 
+        selected_color=COLOR_GOLD,
         selected_hover_color=COLOR_GOLD_HOVER,
         text_color=COLOR_TEXT_LIGHT,
         fg_color=COLOR_CARD_BG,
         height=32
     )
     tab_segment.grid(row=0, column=1, sticky="ew")
+
+    # Stats bar: total counts + session counts
+    stats_lbl = ctk.CTkLabel(
+        controls_header,
+        text="",
+        font=("Arial", 10),
+        text_color=COLOR_TEXT_MUTED,
+        anchor="w"
+    )
+    stats_lbl.grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 0))
 
     scroll_frame_approved.pack(pady=(5, 5), padx=15, fill="both", expand=True)
 
@@ -353,7 +544,7 @@ def open_window(parent_window):
         btn_frame.pack(side="right", padx=10, pady=6)
 
         btn_letter = ctk.CTkButton(
-            btn_frame, text="✍️ Письмо", width=85, height=32,
+            btn_frame, text=tr("btn_letter"), width=85, height=32,
             fg_color=COLOR_CARD_BG, hover_color=COLOR_INPUT_BG,
             text_color=COLOR_TEXT_MUTED,
             border_width=0,
@@ -362,7 +553,7 @@ def open_window(parent_window):
         btn_letter.grid(row=0, column=0, padx=3)
 
         btn_apply = ctk.CTkButton(
-            btn_frame, text="🚀 Откликнуться", width=110, height=32,
+            btn_frame, text=tr("btn_apply"), width=110, height=32,
             fg_color=COLOR_CYAN_NEON, hover_color=COLOR_CYAN_HOVER,
             text_color=COLOR_BG_DARK, font=("Arial", 12, "bold"),
             border_width=0,
@@ -379,6 +570,8 @@ def open_window(parent_window):
             command=lambda: delete_approved_item(url)
         )
         btn_delete.grid(row=0, column=2, padx=3)
+
+        return card
 
     def build_rejected_card(parent_frame, item):
         company = item.get("company", "Не указана")
@@ -406,7 +599,7 @@ def open_window(parent_window):
         opt_frame.pack(anchor="e", padx=15, pady=(0, 8))
 
         btn_anyway = ctk.CTkButton(
-            opt_frame, text="🔗 Всё равно откликнуться", width=170, height=28, corner_radius=6,
+            opt_frame, text=tr("btn_anyway"), width=170, height=28, corner_radius=6,
             fg_color=COLOR_GOLD, hover_color=COLOR_GOLD_HOVER,
             text_color=COLOR_BG_DARK,
             font=("Arial", 11, "bold"),
@@ -416,7 +609,7 @@ def open_window(parent_window):
         btn_anyway.pack(side="left", padx=5)
 
         btn_delete_rej = ctk.CTkButton(
-            opt_frame, text="Удалить из истории ✕", width=150, height=28, corner_radius=6,
+            opt_frame, text=tr("btn_delete_rej"), width=150, height=28, corner_radius=6,
             fg_color=COLOR_CARD_BG, hover_color=COLOR_INPUT_BG,
             text_color=COLOR_TEXT_LIGHT,
             font=("Arial", 11),
@@ -425,69 +618,251 @@ def open_window(parent_window):
         )
         btn_delete_rej.pack(side="left", padx=5)
 
-    def refresh_list(force=False):
-        """Интеллектуально перерисовывает списки вакансий только при изменении данных в БД"""
+        return card
+
+    def _vacancy_signature(item, kind):
+        """
+        Строит сигнатуру содержимого карточки. Если данные вакансии с тем же url
+        изменились (например, переписалось письмо или причина), сигнатура изменится,
+        и карточка будет пересоздана. Если нет — карточка остаётся нетронутой.
+        """
+        if kind == "APPROVED":
+            return (
+                item.get("company", ""),
+                item.get("title", ""),
+                item.get("cover_letter", ""),
+            )
+        return (
+            item.get("company", ""),
+            item.get("title", ""),
+            item.get("reason", ""),
+        )
+
+    def _sync_cards(scroll_frame, items, registry, kind):
+        """
+        Дифференциально синхронизирует карточки во фрейме со списком items.
+          - удаляет карточки, которых больше нет в БД (по url);
+          - добавляет новые;
+          - пересоздаёт только те, у кого изменилось содержимое;
+          - неизменившиеся оставляет на месте (скролл и позиция сохраняются).
+        Возвращает True, если фрейм визуально изменился (что-то добавлено/удалено).
+        """
+        builder = build_approved_card if kind == "APPROVED" else build_rejected_card
+        empty_text = tr("empty_approved") if kind == "APPROVED" else tr("empty_rejected")
+
+        # Карта актуальных записей по url с сохранением порядка следования из БД.
+        desired = {}
+        order = []
+        for item in items:
+            url = item.get("url", "#")
+            # При коллизии url (теоретически возможной) последняя запись побеждает.
+            if url not in desired:
+                order.append(url)
+            desired[url] = item
+
+        changed = False
+
+        # 1. Удаляем карточки, которых больше нет в БД.
+        for url in list(registry.keys()):
+            if url not in desired:
+                entry = registry.pop(url)
+                try:
+                    entry["card"].destroy()
+                except Exception:
+                    pass
+                changed = True
+
+        # 2. Добавляем новые и обновляем изменившиеся.
+        for url in order:
+            item = desired[url]
+            sig = _vacancy_signature(item, kind)
+            existing = registry.get(url)
+            if existing is None:
+                # Новая карточка.
+                card = builder(scroll_frame, item)
+                registry[url] = {"card": card, "sig": sig}
+                changed = True
+            elif existing.get("sig") != sig:
+                # Содержимое изменилось — пересоздаём только эту карточку на её месте.
+                try:
+                    existing["card"].destroy()
+                except Exception:
+                    pass
+                card = builder(scroll_frame, item)
+                registry[url] = {"card": card, "sig": sig}
+                changed = True
+
+        # 3. Управляем лейблом-заглушкой "список пуст".
+        if kind == "APPROVED":
+            if not registry and window.approved_empty_lbl is None:
+                window.approved_empty_lbl = ctk.CTkLabel(
+                    scroll_frame, text=empty_text, font=("Arial", 14), text_color=COLOR_TEXT_MUTED
+                )
+                window.approved_empty_lbl.pack(pady=50)
+            elif registry and window.approved_empty_lbl is not None:
+                try:
+                    window.approved_empty_lbl.destroy()
+                except Exception:
+                    pass
+                window.approved_empty_lbl = None
+        else:
+            if not registry and window.rejected_empty_lbl is None:
+                window.rejected_empty_lbl = ctk.CTkLabel(
+                    scroll_frame, text=empty_text, font=("Arial", 14), text_color=COLOR_TEXT_MUTED
+                )
+                window.rejected_empty_lbl.pack(pady=50)
+            elif registry and window.rejected_empty_lbl is not None:
+                try:
+                    window.rejected_empty_lbl.destroy()
+                except Exception:
+                    pass
+                window.rejected_empty_lbl = None
+
+        return changed
+
+    def update_clear_button_state(approved, rejected):
+        """
+        Актуализирует доступность кнопки 'Очистить список' строго по содержимому
+        ТЕКУЩЕЙ активной вкладки. Вызывается ДО любого раннего return, чтобы при
+        переключении вкладок состояние кнопки всегда было корректным.
+
+        ВАЖНО: реально вызывает .configure() ТОЛЬКО когда состояние изменилось.
+        Это убирает баг "потухающего" hover-эффекта: при каждом тике таймера
+        повторный configure(state=...) сбрасывал внутренний hover-статус
+        CustomTkinter, и подсветка кнопки гасла прямо под курсором.
+        """
+        current_list = approved if window.current_tab == "APPROVED" else rejected
+        desired_state = "normal" if current_list else "disabled"
+        if desired_state == window.last_clear_btn_state:
+            return  # Состояние не изменилось — не трогаем виджет, hover сохраняется.
+        try:
+            btn_clear_all.configure(state=desired_state)
+            window.last_clear_btn_state = desired_state
+        except Exception as e:
+            print(f"[Results UI]: Не удалось обновить состояние кнопки очистки: {e}")
+
+    def update_tab_labels(approved, rejected):
+        """
+        Обновляет подписи и выбранный сегмент переключателя вкладок.
+        Тоже работает через кэш: configure(values=...) на CTkSegmentedButton
+        пересоздаёт дочерние кнопки и даёт визуальную вспышку, поэтому делаем это
+        только при фактическом изменении количества записей или активной вкладки.
+        """
+        approved_text = tr("tab_approved", n=len(approved))
+        rejected_text = tr("tab_rejected", n=len(rejected))
+        # Обновляем кэш префиксов для language-independent детекции
+        window._tab_approved_text = tr("tab_approved", n=0)
+        window._tab_rejected_text = tr("tab_rejected", n=0)
+        values = (approved_text, rejected_text)
+        selected = approved_text if window.current_tab == "APPROVED" else rejected_text
+
+        # Пересобираем список значений только если подписи реально изменились.
+        if values != window.last_tab_values:
+            try:
+                tab_segment.configure(values=[approved_text, rejected_text])
+                window.last_tab_values = values
+                # После смены values принудительно переустанавливаем выбор,
+                # т.к. внутренний выбор мог слететь при пересборке.
+                window.last_tab_selected = None
+            except Exception as e:
+                print(f"[Results UI]: Не удалось обновить подписи вкладок: {e}")
+
+        # Устанавливаем выбранный сегмент только если он реально изменился.
+        if selected != window.last_tab_selected:
+            try:
+                tab_segment.set(selected)
+                window.last_tab_selected = selected
+            except Exception as e:
+                print(f"[Results UI]: Не удалось установить активную вкладку: {e}")
+
+    def _dedup_by_url(items):
+        """Оставляет только первую запись для каждого URL — устраняет дубли в БД."""
+        seen = {}
+        for item in items:
+            url = item.get("url", "#")
+            if url not in seen:
+                seen[url] = item
+        return list(seen.values())
+
+    def refresh_list(force=False, _preloaded=None):
+        """
+        Дифференциально обновляет списки вакансий без полного уничтожения карточек.
+        _preloaded: (approved, rejected) tuple pre-fetched from a background thread.
+        """
         if not window.winfo_exists():
             return
 
+        if _preloaded is not None:
+            approved, rejected = _preloaded
+        else:
+            try:
+                approved = _dedup_by_url(storage_manager.get_all_approved())
+                rejected = _dedup_by_url(storage_manager.get_all_rejected())
+            except Exception as e:
+                print(f"[Ошибка чтения БД]: {e}")
+                approved = []
+                rejected = []
+
+        # --- Эти обновления выполняются ВСЕГДА, даже без изменений в данных, ---
+        # --- но внутри себя дёргают виджеты только при реальном изменении.    ---
+        update_tab_labels(approved, rejected)
+
+        # Критично: состояние кнопки очистки актуализируется до возможного return.
+        update_clear_button_state(approved, rejected)
+
+        # Stats bar
         try:
-            approved = storage_manager.get_all_approved()
-            rejected = storage_manager.get_all_rejected()
-        except Exception as e:
-            print(f"[Ошибка чтения БД]: {e}")
-            approved = []
-            rejected = []
+            n_a, n_r = len(approved), len(rejected)
+            total = n_a + n_r
+            rate_str = f"{100 * n_a // total}%" if total > 0 else "—"
+            sess_a = getattr(parent_window, "_session_approved", 0)
+            sess_r = getattr(parent_window, "_session_rejected", 0)
+            stats_lbl.configure(
+                text=f"✓ {n_a}  ✕ {n_r}  ◑ {rate_str} rate  │  session +{sess_a} / ✕{sess_r}"
+            )
+        except Exception:
+            pass
+        # ----------------------------------------------------------------------
 
         approved_changed = (len(approved) != window.last_approved_count)
         rejected_changed = (len(rejected) != window.last_rejected_count)
 
+        # Если ничего не поменялось и обновление не принудительное — выходим,
+        # но кнопка и подписи уже корректно обновлены выше.
         if not force and not approved_changed and not rejected_changed:
             return
 
-        approved_text = f"Одобренные ИИ ({len(approved)}) 👍"
-        rejected_text = f"Отклоненные ИИ ({len(rejected)}) ✕"
+        # Синхронизируем карточки дифференциально (без мерцания).
+        _sync_cards(scroll_frame_approved, approved, window.approved_cards, "APPROVED")
+        _sync_cards(scroll_frame_rejected, rejected, window.rejected_cards, "REJECTED")
 
-        tab_segment.configure(values=[approved_text, rejected_text])
-
-        if window.current_tab == "APPROVED":
-            tab_segment.set(approved_text)
-        else:
-            tab_segment.set(rejected_text)
-
-        if force or approved_changed:
-            window.last_approved_count = len(approved)
-            for widget in scroll_frame_approved.winfo_children():
-                widget.destroy()
-            
-            if not approved:
-                empty_lbl = ctk.CTkLabel(scroll_frame_approved, text="Список одобренных вакансий пока пуст.", font=("Arial", 14), text_color=COLOR_TEXT_MUTED)
-                empty_lbl.pack(pady=50)
-            else:
-                for item in approved:
-                    build_approved_card(scroll_frame_approved, item)
-
-        if force or rejected_changed:
-            window.last_rejected_count = len(rejected)
-            for widget in scroll_frame_rejected.winfo_children():
-                widget.destroy()
-            
-            if not rejected:
-                empty_lbl = ctk.CTkLabel(scroll_frame_rejected, text="Журнал отклонений пуст.", font=("Arial", 14), text_color=COLOR_TEXT_MUTED)
-                empty_lbl.pack(pady=50)
-            else:
-                for item in rejected:
-                    build_rejected_card(scroll_frame_rejected, item)
-
-        current_list = approved if window.current_tab == "APPROVED" else rejected
-        if not current_list:
-            btn_clear_all.configure(state="disabled")
-        else:
-            btn_clear_all.configure(state="normal")
+        window.last_approved_count = len(approved)
+        window.last_rejected_count = len(rejected)
 
     def auto_refresh_loop():
-        if window.winfo_exists():
-            refresh_list(force=False)
-            window.after(3000, auto_refresh_loop)
+        if not window.winfo_exists():
+            return
+        # Читаем БД в фоновом потоке, чтобы не блокировать UI во время файлового I/O
+        import threading as _threading
+        def _bg_read():
+            try:
+                a = _dedup_by_url(storage_manager.get_all_approved())
+                r = _dedup_by_url(storage_manager.get_all_rejected())
+            except Exception:
+                a, r = [], []
+            def _apply():
+                if window.winfo_exists():
+                    refresh_list(force=False, _preloaded=(a, r))
+            # Двойная проверка: window может быть уничтожено пока поток читал БД.
+            # winfo_exists() + try/except защищает от TclError при вызове after()
+            # из фонового потока после закрытия окна.
+            try:
+                if window.winfo_exists():
+                    window.after(0, _apply)
+            except Exception:
+                pass
+        _threading.Thread(target=_bg_read, daemon=True).start()
+        window.after(3000, auto_refresh_loop)
 
     def delete_approved_item(url):
         storage_manager.delete_vacancy_by_url(url)
@@ -500,46 +875,62 @@ def open_window(parent_window):
     refresh_list(force=True)
     auto_refresh_loop()
 
+    # Show window after all UI is packed — correct Windows HWND + icon pattern
+    window.after(120, lambda: _show_with_icon(window, 680, 750, parent_window, grab=False))
+
 def show_letter_window(parent, title, company, cover_letter):
     """Детальный просмотр сгенерированного письма"""
     top = ctk.CTkToplevel(parent)
     top.withdraw()
-    top.title("Сопроводительное письмо")
+    top.title(tr("letter_win_title"))
     top.configure(fg_color=COLOR_BG_DARK)
-    
+
     force_dark_title_bar(top)
-    set_window_icon(top)
-    
-    center_window(top, 640, 600, parent)
-    top.focus()
-    
-    header_text = f"Сопроводительное письмо\n{title} в {company}"
-    header_label = ctk.CTkLabel(
-        top, text=header_text, font=("Arial", 14, "bold"), 
-        text_color=COLOR_CYAN_NEON, justify="center", wraplength=580
-    )
-    header_label.pack(pady=15, padx=20)
-    
+    # Icon + geometry set via _show_with_icon after UI is built
+
+    letter_header = ctk.CTkFrame(top, fg_color="transparent")
+    letter_header.pack(pady=(15, 4), padx=20)
+    _letter_logo = _load_logo_image(22)
+    if _letter_logo:
+        ctk.CTkLabel(letter_header, image=_letter_logo, text="").pack(side="left", padx=(0, 8))
+    ctk.CTkLabel(
+        letter_header,
+        text=tr("letter_win_title"),
+        font=("Arial", 14, "bold"),
+        text_color=COLOR_CYAN_NEON
+    ).pack(side="left")
+
+    ctk.CTkLabel(
+        top,
+        text=f"{title} — {company}",
+        font=("Arial", 12),
+        text_color=COLOR_TEXT_MUTED,
+        justify="center",
+        wraplength=580
+    ).pack(padx=20, pady=(0, 6))
+
     content_box = ctk.CTkTextbox(
-        top, font=("Arial", 13), width=580, height=360, 
+        top, font=("Arial", 13), width=580, height=360,
         fg_color=COLOR_INPUT_BG, text_color=COLOR_TEXT_LIGHT,
         border_width=1, border_color=COLOR_CARD_BG
     )
     content_box.pack(pady=10, padx=20)
-    content_box.insert("0.0", cover_letter if cover_letter else "Письмо не было сгенерировано.")
-    
+    content_box.insert("0.0", cover_letter if cover_letter else "—")
+
     bind_russian_hotkeys(content_box)
 
     def copy_to_clipboard():
         top.clipboard_clear()
         top.clipboard_append(content_box.get("0.0", "end-1c"))
-        btn_copy.configure(text="Успешно скопировано! ✓", fg_color=COLOR_CYAN_HOVER, text_color=COLOR_TEXT_LIGHT)
-        top.after(2000, lambda: btn_copy.configure(text="Копировать письмо в буфер 📋", fg_color=COLOR_CYAN_NEON, text_color=COLOR_BG_DARK))
+        btn_copy.configure(text=tr("copied_ok_text"), fg_color=COLOR_CYAN_HOVER, text_color=COLOR_TEXT_LIGHT)
+        top.after(2000, lambda: btn_copy.configure(text=tr("btn_copy"), fg_color=COLOR_CYAN_NEON, text_color=COLOR_BG_DARK))
 
     btn_copy = ctk.CTkButton(
-        top, text="Копировать письмо в буфер 📋", 
+        top, text=tr("btn_copy"),
         command=copy_to_clipboard, fg_color=COLOR_CYAN_NEON, text_color=COLOR_BG_DARK,
         height=42, font=("Arial", 13, "bold"), hover_color=COLOR_CYAN_HOVER,
         border_width=0
     )
     btn_copy.pack(pady=15)
+
+    top.after(120, lambda: _show_with_icon(top, 640, 600, parent, grab=False))
