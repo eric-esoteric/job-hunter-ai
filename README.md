@@ -34,10 +34,10 @@
       <ul>
         <li>💰 <b>100% Free</b> — runs on your own API keys, including the free Gemini tier</li>
         <li>🛡️ <b>Hard filter — up to 60%</b> — scam, MLM, 60h/week slavery, and info-business don't get through</li>
-        <li>✍️ <b>Cover letter in seconds</b> — a personalized response matched to the exact job requirements</li>
+        <li>✍️ <b>Cover letter in seconds</b> — a personalized response matched to the job, in your app language</li>
         <li>🌐 <b>Cloud or your PC</b> — Gemini, GPT-5, Claude 4 <i>or</i> locally via Ollama / LM Studio</li>
         <li>🔒 <b>Full privacy</b> — with local AI, your data never leaves your machine</li>
-        <li>🌍 <b>EN / RU</b> — fully localized interface, language persists between sessions</li>
+        <li>🌍 <b>EN / RU</b> — interface language = letter language and PDF resume parsing</li>
       </ul>
     </td>
     <td width="40%" align="center" valign="middle">
