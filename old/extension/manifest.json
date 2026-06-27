@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Job Hunter AI Parser",
+  "version": "1.3",
+  "description": "Мгновенный парсинг вакансий напрямую в Job Hunter AI",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icon.png",
+      "32": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    },
+    "default_title": "Отправить вакансию в Job Hunter AI"
+  }
+}

@@ -130,18 +130,21 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
  ┌────────────────────────────────────────┐
  │            CHROME BROWSER              │
  │  (User clicks in the extension)        │
+ │  Text truncated to 50 000 chars        │
  └───────────────────┬────────────────────┘
                      │ HTTP POST ( vacancy_data )
                      ▼
  ┌────────────────────────────────────────┐
  │          LOCAL FLASK API               │  [main_app.py]
- │ (Kills zombie processes on port 5000)  │  jh_version.py → build metadata
+ │  threaded=True · parallel workers      │  _flask_ready Event → "STARTING…" UI
+ │  O(1) dedup → queue.put() (no lock)   │  Zombie killer on port 5000
  └───────────────────┬────────────────────┘
-                     │ Enqueues task (.put)
+                     │ Instant enqueue (.put)
                      ▼
  ┌────────────────────────────────────────┐
  │        THREAD-SAFE QUEUE               │  [queue.Queue]
  │   15s Timer | Rate Limit Guard         │  Countdown status bar
+ │   Worker-side dedup safety net         │
  └───────────────────┬────────────────────┘
                      │ Background thread → task
                      ▼
@@ -164,6 +167,8 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
                     ▼
  ┌────────────────────────────────────────┐
  │          JH STORAGE MANAGER            │  [src/jh_storage_manager.py]
+ │  _file_lock  — disk I/O only           │  Always-live URL sets in memory
+ │  _url_lock   — set mutations only      │  O(1) dedup · no disk read on check
  │    AppData/Roaming/Job Hunter AI/      │  Resume history | PDF import
  └───────────────────┬────────────────────┘  Log: max 50 entries
                      ▼
@@ -206,10 +211,13 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
 <details>
 <summary><b>📦 v2.0.2 — Bug Fix Release (Current)</b></summary>
 
-* **[Extension]** Fixed rapid-click capture: when clicking 30 vacancies within 5 seconds, only 5 were saved. Dedup checks read the entire JSON file per request under `_file_lock`. Replaced with O(1) in-memory URL caches, populated lazily and updated on every write/delete.
-* **[Thread Safety]** Cache globals are now guarded by `_file_lock` on every mutation (`.add()`, `.discard()`, `= None`). Local reference capture inside `with _file_lock:` eliminates a double-read race where a concurrent `clear_all_vacancies()` could reassign the global between two reads.
-* **[Storage]** Fixed queue fill-up and errors after ~11 approved vacancies. The full `document.body.innerText` (potentially several MB per page) was stored in every approved record. As the file grew, `_modify_file()` held `_file_lock` for over 8 seconds, timing out all extension requests. Removed the unused `description` field — AI analysis uses the in-memory request payload, not stored data.
-* **[Migration]** Added a one-time startup migration that strips the legacy `description` field from all existing approved vacancy records written by older sessions. Without it, upgrading to v2.0.2 would not help users with existing data — old bloated records would continue to cause `_file_lock` timeouts until the approved file was manually cleared.
+* **[Storage]** Complete rewrite of the concurrency model in `jh_storage_manager.py`. Two independent, never-nested locks replace the old single-lock design: `_file_lock` (held only during `_modify_file()` read-modify-write cycles on disk) and `_url_lock` (held for microseconds on in-memory `set` mutations only). Dedup is now O(1) against always-live `_approved_urls` / `_rejected_urls` sets populated at startup — zero disk I/O per check.
+* **[Storage]** Removed the `description` field (raw `document.body.innerText`, up to several MB per vacancy) from approved records. AI analysis works on the in-memory request payload — the field was never read back from storage. As records accumulated, the bloated file held `_file_lock` for 8+ seconds, timing out all concurrent webhook requests.
+* **[Storage]** One-time startup migration strips the legacy `description` field from existing approved records before Flask or the worker thread start (`_migrate_strip_description()`). Without this, the storage fix would only benefit new sessions.
+* **[Enqueue]** Removed `_enqueue_lock` and `_in_flight_urls` from `enqueue_vacancy()`. The previous triple-check dedup system serialized all 24 parallel Flask threads behind a single lock — one vacancy per second could be acknowledged under rapid clicks. Replaced with a single O(1) storage dedup check followed by unconditional `queue.put()`. Worker thread performs a lightweight safety dedup pass to handle rare concurrent-submit races.
+* **[Startup]** Fixed Flask startup race: the UI previously set `is_active = True` before Flask finished binding to port 5000. Extension clicks during the startup window returned `ERR_CONNECTION_REFUSED`. Fixed with `threading.Event` (`_flask_ready`): Flask signals the event immediately after `make_server()` succeeds, UI polls non-blocking via `self.after()` — zero socket I/O on the main thread. Button shows "STARTING…" and is disabled until the server is ready.
+* **[Extension]** Removed `tab.status === 'loading'` guard. Modern SPAs (LinkedIn, HH.ru, Greenhouse) never set `status` to `'complete'` due to background requests — the check blocked vacancy collection on fully-rendered pages.
+* **[Extension]** Page text truncated to 50 000 characters before sending. Full `document.body.innerText` can reach several MB; under OBS or heavy system load, 24 Flask threads competing for the GIL during `json.loads()` caused the last request in the batch to stall 5+ seconds and hit the 8 s fetch timeout.
 
 </details>
 
@@ -289,8 +297,13 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
 <details>
 <summary><b>🟢 v2.0.2 — Bug Fix Release (Done)</b></summary>
 
-- [x] Fixed extension rapid-click timeout: O(1) in-memory URL dedup caches with thread-safe mutations.
-- [x] Fixed queue fill-up after ~11 vacancies: removed unused `description` field from approved vacancy storage.
+- [x] Complete rewrite of storage concurrency: two independent locks (`_file_lock` / `_url_lock`), always-live URL sets, O(1) dedup with zero disk I/O on the hot path.
+- [x] Removed `description` field from approved records — eliminates multi-MB file bloat that caused write timeouts under `_file_lock`.
+- [x] One-time startup migration strips legacy `description` from all existing records before the server starts (`_migrate_strip_description()`).
+- [x] Removed `_enqueue_lock` / `_in_flight_urls` — enqueue simplified to O(1) dedup + `queue.put()` with no thread serialization; worker-side safety dedup as backstop.
+- [x] Fixed Flask startup race via `threading.Event` (`_flask_ready`): button disabled with "STARTING…" state until port 5000 is bound.
+- [x] Removed `tab.status === 'loading'` check in extension — SPAs (LinkedIn, HH.ru) never reach `'complete'`; check blocked collection on fully-loaded pages.
+- [x] Extension text truncated to 50 000 chars — prevents GIL contention stall under 24 concurrent Flask workers on heavy system load.
 
 </details>
 

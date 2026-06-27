@@ -6,16 +6,18 @@ import threading
 APPDATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'Job Hunter AI')
 
 _file_lock = threading.Lock()
+# Dedicated lock for the URL sets only. Held for microseconds (set operations).
+# NEVER acquired while _file_lock is held, and vice-versa — no nesting, no deadlock.
+_url_lock = threading.Lock()
 
-# In-memory URL caches — populated lazily on first dedup check, updated on every
-# write/delete so we never read the entire JSON file per-request.
-# None means "not yet built"; an empty set means "file is empty".
-_approved_url_cache: "set | None" = None
-_rejected_url_cache: "set | None" = None
+# Always-live URL sets: populated at startup by init_db(), mutated on every
+# save/delete/clear. Never None — no cold-path file reads during live requests.
+_approved_urls: set = set()
+_rejected_urls: set = set()
 
 
 def _build_url_set_unlocked(filepath: str) -> set:
-    """Read URL set directly from a vacancy file. Caller must hold _file_lock."""
+    """Read URL set from a vacancy file. Caller must ensure no concurrent writes."""
     if not os.path.exists(filepath):
         return set()
     try:
@@ -64,6 +66,12 @@ def init_db():
     if not os.path.exists(REJECTED_FILE):
         _save_file(REJECTED_FILE, [])
     _migrate_strip_description()
+    # Populate URL sets from disk before Flask/worker threads start.
+    # Single-threaded here — no lock needed, safe to read files directly.
+    _approved_urls.clear()
+    _approved_urls.update(_build_url_set_unlocked(APPROVED_FILE))
+    _rejected_urls.clear()
+    _rejected_urls.update(_build_url_set_unlocked(REJECTED_FILE))
 
 def _load_file(filepath):
     """Безопасно загружает данные из JSON файла (без блокировки — только для чтения)."""
@@ -253,32 +261,25 @@ def set_show_local_warning(value):
 
 def save_approved_vacancy(company, title, url, cover_letter="", description=""):
     """Атомарно добавляет новую одобренную ИИ вакансию в список."""
-    global _approved_url_cache
     # description (raw page text) intentionally not stored — can be hundreds of KB
     # per vacancy, is never read back from the file, and would make _modify_file()
     # progressively slower with each new record, causing request timeouts at scale.
-    new_vacancy = {
-        "company": company,
-        "title": title,
-        "url": url,
-        "cover_letter": cover_letter,
-    }
+    new_vacancy = {"company": company, "title": title, "url": url, "cover_letter": cover_letter}
     _modify_file(APPROVED_FILE, lambda data: data + [new_vacancy])
-    with _file_lock:
-        if _approved_url_cache is not None and url and url != "#":
-            _approved_url_cache.add(url)
+    if url and url != "#":
+        with _url_lock:
+            _approved_urls.add(url)
 
 def save_rejected_vacancy(company, title, url, reason=""):
     """Атомарно добавляет отклоненную вакансию в журнал (макс 50 записей)."""
-    global _rejected_url_cache
     new_vacancy = {"company": company, "title": title, "url": url, "reason": reason}
     def _append_capped(data):
         data.append(new_vacancy)
         return data[-50:] if len(data) > 50 else data
     _modify_file(REJECTED_FILE, _append_capped)
-    with _file_lock:
-        if _rejected_url_cache is not None and url and url != "#":
-            _rejected_url_cache.add(url)
+    if url and url != "#":
+        with _url_lock:
+            _rejected_urls.add(url)
 
 def get_all_approved():
     """Возвращает список всех сохраненных вакансий."""
@@ -290,57 +291,41 @@ def get_all_rejected():
 
 def delete_vacancy_by_url(url):
     """Атомарно удаляет одобренную вакансию по URL."""
-    global _approved_url_cache
     _modify_file(APPROVED_FILE, lambda data: [v for v in data if v.get("url") != url])
-    with _file_lock:
-        if _approved_url_cache is not None:
-            _approved_url_cache.discard(url)
+    with _url_lock:
+        _approved_urls.discard(url)
 
 def delete_rejected_by_url(url):
     """Атомарно удаляет отклоненную вакансию по URL."""
-    global _rejected_url_cache
     _modify_file(REJECTED_FILE, lambda data: [v for v in data if v.get("url") != url])
-    with _file_lock:
-        if _rejected_url_cache is not None:
-            _rejected_url_cache.discard(url)
+    with _url_lock:
+        _rejected_urls.discard(url)
 
 def clear_all_vacancies():
     """Атомарно очищает базу данных одобренных."""
-    global _approved_url_cache
     _modify_file(APPROVED_FILE, lambda _: [])
-    with _file_lock:
-        _approved_url_cache = None
+    with _url_lock:
+        _approved_urls.clear()
 
 def clear_all_rejected():
     """Атомарно очищает базу данных отклоненных."""
-    global _rejected_url_cache
     _modify_file(REJECTED_FILE, lambda _: [])
-    with _file_lock:
-        _rejected_url_cache = None
+    with _url_lock:
+        _rejected_urls.clear()
 
 def vacancy_url_in_approved(url: str) -> bool:
-    """Проверяет наличие URL в одобренных вакансиях (O(1) через in-memory кеш)."""
-    global _approved_url_cache
+    """O(1) check against the live in-memory set. Only _url_lock — never waits on I/O."""
     if not url or url == "#":
         return False
-    with _file_lock:
-        cache = _approved_url_cache
-        if cache is None:
-            _approved_url_cache = _build_url_set_unlocked(APPROVED_FILE)
-            cache = _approved_url_cache
-        return url in cache
+    with _url_lock:
+        return url in _approved_urls
 
 def vacancy_url_in_rejected(url: str) -> bool:
-    """Проверяет наличие URL в отклонённых вакансиях (O(1) через in-memory кеш)."""
-    global _rejected_url_cache
+    """O(1) check against the live in-memory set. Only _url_lock — never waits on I/O."""
     if not url or url == "#":
         return False
-    with _file_lock:
-        cache = _rejected_url_cache
-        if cache is None:
-            _rejected_url_cache = _build_url_set_unlocked(REJECTED_FILE)
-            cache = _rejected_url_cache
-        return url in cache
+    with _url_lock:
+        return url in _rejected_urls
 
 def get_resume_history() -> list:
     """Возвращает список сохранённых резюме [{name, text}]."""

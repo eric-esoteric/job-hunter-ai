@@ -70,18 +70,14 @@ chrome.action.onClicked.addListener(async (tab) => {
       throw new Error('Парсинг невозможен на этой вкладке');
     }
 
-    // Injecting into a still-loading tab risks capturing the previous page's
-    // content or a blank body mid-transition (common on SPAs during route change).
-    if (tab.status === 'loading') {
-      throw new Error('Страница ещё загружается — попробуйте ещё раз');
-    }
-
     // Extract the page text via content script injection.
     const injection = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => document.body.innerText
     });
-    const pageText = injection?.[0]?.result ?? '';
+    // Truncate to 50 000 chars: enough for any AI model to analyse a job posting,
+    // prevents sending multi-MB pages that would stall Flask's JSON parser under GIL.
+    const pageText = (injection?.[0]?.result ?? '').slice(0, 50000);
 
     // SPAs (LinkedIn, Greenhouse, etc.) temporarily blank document.body.innerText
     // during client-side route transitions. Sending an empty payload would silently

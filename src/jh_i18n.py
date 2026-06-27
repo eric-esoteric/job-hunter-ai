@@ -73,6 +73,8 @@ _STRINGS = {
         "warn_ok":               "Got it",
         # Status / runtime messages
         "status_key_required":   "● Enter API key for provider {provider}",
+        "status_starting":       "● Starting server — ready in a moment...",
+        "btn_starting":          "STARTING...",
         "status_active":         "● Assistant active. Waiting for vacancies...",
         "status_stopped":        "● Assistant stopped",
         "status_queue":          "● [{done} done] Pausing {sec}s · {q} in queue",
@@ -212,6 +214,8 @@ _STRINGS = {
         "warn_ok":               "Понятно",
         # Status / runtime messages
         "status_key_required":   "● Введите API-ключ для провайдера {provider}",
+        "status_starting":       "● Запуск сервера — секунду...",
+        "btn_starting":          "ЗАПУСК...",
         "status_active":         "● Ассистент активен. Ожидание вакансий...",
         "status_stopped":        "● Ассистент отключен",
         "status_queue":          "● [{done} обраб.] Пауза {sec}с · в очереди: {q}",

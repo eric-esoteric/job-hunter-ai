@@ -306,18 +306,14 @@ class JobHunterApp(ctk.CTk):
         # и предотвращения утечки/дублирования потоков Flask.
         self.flask_server = None      # werkzeug.serving.BaseWSGIServer
         self.flask_thread = None      # поток, в котором крутится serve_forever
+        # Set by run_flask_server() after make_server() binds the socket.
+        # _activate_when_ready() polls this — no blocking I/O on the main thread.
+        self._flask_ready = threading.Event()
 
         # Потокобезопасная очередь для вакансий
         self.vacancy_queue = queue.Queue()
         self.worker_thread = None
         self.stop_worker_event = threading.Event()
-        # Мьютекс для атомарной проверки дублей в enqueue_vacancy():
-        # защищает от TOCTOU-гонки при параллельных Flask-запросах.
-        self._enqueue_lock = threading.Lock()
-        # URL-ы, снятые с очереди, но ещё не сохранённые в БД.
-        # Предотвращает повторную постановку одной вакансии в очередь
-        # пока она находится на стадии обработки воркером.
-        self._in_flight_urls: set = set()
         
         # Загружаем конфигурацию и применяем язык интерфейса
         self.app_config = jh_storage_manager.load_config()
@@ -1574,12 +1570,8 @@ class JobHunterApp(ctk.CTk):
                 self._session_rejected = 0
 
             self.save_current_config()
-            self.is_active = True
             self.set_inputs_state("disabled")
-
             self._show_normal_toggle()
-            self.btn_toggle.configure(text=tr("btn_stop"), fg_color=COLOR_RED, hover_color=COLOR_RED_HOVER, text_color=COLOR_TEXT_LIGHT)
-            self.status_lbl.configure(text=tr("status_active"), text_color=COLOR_CYAN_NEON)
 
             if not was_paused:
                 while not self.vacancy_queue.empty():
@@ -1594,8 +1586,23 @@ class JobHunterApp(ctk.CTk):
 
             if not self.server_started:
                 self.server_started = True
+                self._flask_ready.clear()  # reset in case of restart
                 self.flask_thread = threading.Thread(target=self.run_flask_server, daemon=True)
                 self.flask_thread.start()
+                # Flask needs time to kill zombie processes (netstat + taskkill) and bind.
+                # Keep is_active=False and show "starting" until _flask_ready is set.
+                # This prevents ERR_CONNECTION_REFUSED during the startup window.
+                self.btn_toggle.configure(text=tr("btn_starting"), state="disabled",
+                                          fg_color=COLOR_GOLD, hover_color=COLOR_GOLD_HOVER,
+                                          text_color=COLOR_BG_DARK)
+                self.status_lbl.configure(text=tr("status_starting"), text_color=COLOR_GOLD)
+                self.after(100, lambda: self._activate_when_ready(0))
+            else:
+                # Flask is already running (stop → start cycle or resume).
+                self.is_active = True
+                self.btn_toggle.configure(text=tr("btn_stop"), fg_color=COLOR_RED,
+                                          hover_color=COLOR_RED_HOVER, text_color=COLOR_TEXT_LIGHT)
+                self.status_lbl.configure(text=tr("status_active"), text_color=COLOR_CYAN_NEON)
         else:
             self.is_active = False
             self.stop_worker_event.set()
@@ -1644,6 +1651,8 @@ class JobHunterApp(ctk.CTk):
             # в отличие от flask_app.run(), который блокирует поток без выхода.
             from werkzeug.serving import make_server
             self.flask_server = make_server("127.0.0.1", port, flask_app, threaded=True)
+            # Socket is bound and listening — safe to accept connections.
+            self._flask_ready.set()
             print(f"[Flask]: Сервер запущен на 127.0.0.1:{port}")
             # serve_forever блокирует ЭТОТ поток до вызова shutdown().
             self.flask_server.serve_forever()
@@ -1683,6 +1692,27 @@ class JobHunterApp(ctk.CTk):
         except Exception as e:
             print(f"[Thread Status Error]: {e}")
 
+    def _activate_when_ready(self, attempt):
+        """Checks _flask_ready Event (set by run_flask_server after make_server binds).
+        Non-blocking: threading.Event.is_set() returns instantly, no I/O on main thread."""
+        if self.is_active:
+            return
+        if self._flask_ready.is_set():
+            self.is_active = True
+            self.btn_toggle.configure(text=tr("btn_stop"), state="normal",
+                                      fg_color=COLOR_RED, hover_color=COLOR_RED_HOVER,
+                                      text_color=COLOR_TEXT_LIGHT)
+            self.status_lbl.configure(text=tr("status_active"), text_color=COLOR_CYAN_NEON)
+        elif attempt < 60:  # wait up to 6 seconds (60 × 100ms)
+            self.after(100, lambda a=attempt: self._activate_when_ready(a + 1))
+        else:
+            # Flask never came up — restore Start button
+            self.is_active = False
+            self.server_started = False
+            self.set_inputs_state("normal")
+            self._show_normal_toggle()
+            self.status_lbl.configure(text=tr("status_server_fail", port=5000), text_color=COLOR_RED)
+
     def _safe_after(self, ms, callback):
         """
         Потокобезопасная обёртка над after(): проверяет существование окна
@@ -1697,40 +1727,21 @@ class JobHunterApp(ctk.CTk):
 
     def enqueue_vacancy(self, data):
         """
-        Атомарно добавляет вакансию в очередь с защитой от дублей.
-        _enqueue_lock гарантирует, что параллельные Flask-потоки не смогут
-        одновременно пройти все три проверки и поставить один URL дважды:
-          1. in-flight: URL снят воркером, но ещё не сохранён в БД.
-          2. queue:     URL уже ожидает в очереди.
-          3. DB:        URL уже обработан (одобрен или отклонён).
+        Добавляет вакансию в очередь. Намеренно без локов — queue.Queue.put()
+        потокобезопасен сам по себе. O(1) проверка дублей через _url_lock
+        (удерживается микросекунды, никакого I/O). Финальная проверка дублей
+        выполняется воркером перед обработкой — ловит редкие гонки.
         """
         url = data.get("url", "")
-
-        with self._enqueue_lock:
-            if url and url != "#":
-                # Проверка 1: вакансия в процессе обработки воркером
-                if url in self._in_flight_urls:
-                    self.update_status(tr("status_duplicate_queue"), COLOR_GOLD)
-                    return
-                # Проверка 2: вакансия уже в очереди
-                try:
-                    if any(item.get("url") == url for item in list(self.vacancy_queue.queue)):
-                        self.update_status(tr("status_duplicate_queue"), COLOR_GOLD)
-                        return
-                except Exception:
-                    pass
-                # Проверка 3: вакансия уже обработана и записана в БД
-                if (jh_storage_manager.vacancy_url_in_approved(url) or
-                        jh_storage_manager.vacancy_url_in_rejected(url)):
-                    self.update_status(tr("status_duplicate_db"), COLOR_TEXT_MUTED)
-                    return
-                # Регистрируем как «в полёте» до освобождения блокировки
-                self._in_flight_urls.add(url)
-
-            self._batch_id += 1
-            self.vacancy_queue.put(data)
-            q_size = self.vacancy_queue.qsize() + (1 if self._worker_has_item else 0)
-            self.update_status(tr("status_queue_added", q=q_size), COLOR_GOLD)
+        if url and url != "#":
+            if (jh_storage_manager.vacancy_url_in_approved(url) or
+                    jh_storage_manager.vacancy_url_in_rejected(url)):
+                self.update_status(tr("status_duplicate_db"), COLOR_TEXT_MUTED)
+                return
+        self._batch_id += 1
+        self.vacancy_queue.put(data)
+        q_size = self.vacancy_queue.qsize() + (1 if self._worker_has_item else 0)
+        self.update_status(tr("status_queue_added", q=q_size), COLOR_GOLD)
 
     def queue_worker_loop(self):
         """Фоновый цикл обработки очереди с динамической задержкой из настроек."""
@@ -1771,15 +1782,20 @@ class JobHunterApp(ctk.CTk):
                         time.sleep(0.2)
 
             if not self.stop_worker_event.is_set():
+                # Worker-side dedup: catches the rare race where two concurrent
+                # Flask threads both passed the enqueue_vacancy check before
+                # either vacancy was saved. O(1), no I/O.
+                url = vacancy_data.get("url", "")
+                if url and url != "#" and (
+                    jh_storage_manager.vacancy_url_in_approved(url) or
+                    jh_storage_manager.vacancy_url_in_rejected(url)
+                ):
+                    self.vacancy_queue.task_done()
+                    self._worker_has_item = False
+                    continue
+
                 self.process_incoming_vacancy(vacancy_data)
                 self.vacancy_queue.task_done()
-
-                # Снимаем in-flight статус ПОСЛЕ сохранения в БД,
-                # чтобы новый webhook на тот же URL получил правильный ответ о дубле.
-                processed_url = vacancy_data.get("url", "")
-                if processed_url and processed_url != "#":
-                    with self._enqueue_lock:
-                        self._in_flight_urls.discard(processed_url)
 
                 # Debounced "queue done" notification: fires only if no new vacancy arrives within 2s.
                 # _batch_id is incremented by enqueue_vacancy; the closure captures current value
@@ -1805,12 +1821,6 @@ class JobHunterApp(ctk.CTk):
                                 pass
                     # _safe_after проверяет существование окна перед after() из фонового потока
                     self._safe_after(2000, _deferred_notif)
-            else:
-                # Воркер останавливается: сбрасываем in-flight для этого URL
-                stopped_url = vacancy_data.get("url", "")
-                if stopped_url and stopped_url != "#":
-                    with self._enqueue_lock:
-                        self._in_flight_urls.discard(stopped_url)
             self._worker_has_item = False
 
     def process_incoming_vacancy(self, vacancy_data):
