@@ -1,41 +1,41 @@
-# ⚙️ Руководство по установке и запуску Job Hunter AI
+# ⚙️ Installation and Setup Guide for Job Hunter AI
 
-Развертывание проекта полностью оптимизировано и занимает всего 4 простых шага.
+Deploying the project is fully optimized and takes just 4 simple steps.
 
-### Шаг 1. Установка программы на компьютер
-1. Скачайте установочный файл `JobHunterAI_Setup.exe` из раздела **[Releases](../../releases)** (либо соберите его вручную скриптом `build_exe.py`).
-2. Запустите установщик и завершите процесс копирования файлов.
-3. В конце установки автоматически откроется папка `extension` — не закрывайте её, она понадобится на следующем шаге.
+### Step 1. Installing the application on your computer
+1. Download the installer `JobHunterAI_Setup.exe` from the **[Releases](../../releases)** section (or build it manually with the `build_exe.py` script).
+2. Run the installer and complete the file copying process.
+3. At the end of installation, the `extension` folder will open automatically — don't close it, you'll need it in the next step.
 
-### Шаг 2. Установка расширения в Google Chrome
-Расширение отвечает за парсинг вакансий и их мгновенную передачу в локальное приложение:
-1. Откройте Google Chrome и перейдите на страницу управления расширениями: `chrome://extensions/`.
-2. В правом верхнем углу включите тумблер **«Режим разработчика»** (Developer mode).
-3. В левом верхнем углу нажмите кнопку **«Загрузить распакованное расширение»** (Load unpacked).
-4. В открывшемся окне укажите путь к папке `extension` (из Шага 1) и нажмите **«Выбор папки»**.
-5. На панели инструментов Chrome нажмите на иконку пазла и закрепите расширение булавкой для быстрого доступа.
+### Step 2. Installing the extension in Google Chrome
+The extension handles job listing parsing and instant delivery to the local application:
+1. Open Google Chrome and navigate to the extensions management page: `chrome://extensions/`.
+2. In the top right corner, enable the **"Developer mode"** toggle.
+3. In the top left corner, click the **"Load unpacked"** button.
+4. In the dialog that opens, navigate to the `extension` folder (from Step 1) and click **"Select Folder"**.
+5. On the Chrome toolbar, click the puzzle icon and pin the extension for quick access.
 
-### Шаг 3. Получение бесплатного ключа Gemini API
-> ⚠️ **Важно для пользователей из РФ:** Так как движок использует официальные серверы Google API, для получения ключа и работы приложения требуется включенный VPN.
+### Step 3. Getting a free Gemini API key
+> ⚠️ **Note for users in restricted regions:** Since the engine uses official Google API servers, a VPN may be required to obtain the key and run the application.
 
-1. Перейдите на платформу [Google AI Studio](https://aistudio.google.com/) и авторизуйтесь под своим Google-аккаунтом.
-2. В левом верхнем углу экрана нажмите кнопку **"Get API key"**.
-3. Нажмите **"Create API key"**, а затем выберите **"Create API key in new project"**.
-4. Скопируйте длинный сгенерированный токен (он начинается на `AIzaSy...`).
+1. Go to [Google AI Studio](https://aistudio.google.com/) and sign in with your Google account.
+2. Click the **"Get API key"** button in the top left corner.
+3. Click **"Create API key"**, then select **"Create API key in new project"**.
+4. Copy the long generated token (it starts with `AIzaSy...`).
 
-### Шаг 4. Первый запуск и настройка
-1. Запустите приложение **Job Hunter AI** с ярлыка на Рабочем столе.
-2. Заполните три ключевых поля в профиле:
-   * **Имя и Фамилия:** Будут автоматически подставляться в финальную подпись сопроводительного письма.
-   * **Опыт работы и навыки:** Подробно опишите свой стек — именно по этим критериям ИИ будет фильтровать вакансии и генерировать релевантный отклик.
-   * **Лицензия и ИИ-доступ:** Вставьте скопированный на Шаге 3 ключ API.
-3. Отметьте галочками желаемые форматы работы (Удаленка, Офис, Гибрид, Фильтр локации РФ).
-4. Нажмите большую зеленую кнопку **«ЗАПУСТИТЬ АССИСТЕНТА»** (статус сменится на *«Ожидание вакансий...»*).
+### Step 4. First launch and setup
+1. Launch the **Job Hunter AI** application from the Desktop shortcut.
+2. Fill in the three key fields in your profile:
+   * **Name and Last Name:** Will be automatically inserted into the final signature of cover letters.
+   * **Work Experience and Skills:** Describe your stack in detail — the AI uses these criteria to filter vacancies and generate a relevant response.
+   * **License and AI Access:** Paste the API key copied in Step 3.
+3. Check the desired work formats (Remote, Office, Hybrid, Russia Location Filter).
+4. Click the large green **"START ASSISTANT"** button (status will change to *"Waiting for vacancies..."*).
 
-### Как пользоваться:
-* Откройте страницу любой интересующей вакансии в браузере и кликните на иконку расширения. 
-* Иконка изменится на статус ожидания `(...)`, а после обработки покажет **OK** (или **ERR**, если забыли включить приложение или ключ недействителен).
-* Вся история, вердикты ИИ-фильтра и готовые кастомные письма бережно сохраняются в разделе приложения **«Открыть одобренные вакансии (Отобрано)»**.
+### How to use:
+* Open any job listing page in your browser and click the extension icon.
+* The icon will change to a loading status `(...)`, and after processing will show **OK** (or **ERR** if you forgot to start the app or the key is invalid).
+* All history, AI filter verdicts, and ready-made custom cover letters are saved in the **"Open approved vacancies (Selected)"** section of the app.
 
 ---
-[Назад к описанию проекта](../README.md)
+[Back to project description](../README.md)

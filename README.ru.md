@@ -1,5 +1,7 @@
 <p align="right">
-  <a href="README.md">🇬🇧 English</a> | <a href="README.ru.md">🇷🇺 Русский</a>
+  <a href="README.md"><img src="https://img.shields.io/badge/EN-English-0078D4?style=for-the-badge" alt="English"></a>
+  &nbsp;
+  <a href="README.ru.md"><img src="https://img.shields.io/badge/RU-Русский-CC0000?style=for-the-badge" alt="Русский"></a>
 </p>
 
 <p align="center">
@@ -51,7 +53,7 @@
 
 Установите десктопное приложение и расширение для Chrome. Полное пошаговое руководство:
 
-[![Инструкция по установке](https://img.shields.io/badge/⚙️_Установка-Читать_руководство-00B981?style=for-the-badge&logo=readme)](docs/INSTALL.md)
+[![Инструкция по установке](https://img.shields.io/badge/⚙️_Установка-Читать_руководство-00B981?style=for-the-badge&logo=readme)](install/INSTALL.ru.md)
 
 <hr>
 
