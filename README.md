@@ -209,6 +209,7 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
 * **[Extension]** Fixed rapid-click capture: when clicking 30 vacancies within 5 seconds, only 5 were saved. Dedup checks read the entire JSON file per request under `_file_lock`. Replaced with O(1) in-memory URL caches, populated lazily and updated on every write/delete.
 * **[Thread Safety]** Cache globals are now guarded by `_file_lock` on every mutation (`.add()`, `.discard()`, `= None`). Local reference capture inside `with _file_lock:` eliminates a double-read race where a concurrent `clear_all_vacancies()` could reassign the global between two reads.
 * **[Storage]** Fixed queue fill-up and errors after ~11 approved vacancies. The full `document.body.innerText` (potentially several MB per page) was stored in every approved record. As the file grew, `_modify_file()` held `_file_lock` for over 8 seconds, timing out all extension requests. Removed the unused `description` field — AI analysis uses the in-memory request payload, not stored data.
+* **[Migration]** Added a one-time startup migration that strips the legacy `description` field from all existing approved vacancy records written by older sessions. Without it, upgrading to v2.0.2 would not help users with existing data — old bloated records would continue to cause `_file_lock` timeouts until the approved file was manually cleared.
 
 </details>
 
