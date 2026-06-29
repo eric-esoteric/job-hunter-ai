@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import threading
 
 # Путь к системной папке AppData\Roaming для текущего пользователя Windows.
@@ -36,28 +37,39 @@ REJECTED_FILE = os.path.join(APPDATA_DIR, "rejected_vacancies.json")
 CONFIG_FILE = os.path.join(APPDATA_DIR, "config.json")
 RESUMES_FILE = os.path.join(APPDATA_DIR, "resume_history.json")
 
-def _migrate_strip_description():
+def _migrate_strip_description() -> None:
     """
     One-time startup migration: removes the 'description' (raw page text) field
-    from all approved vacancy records written by old sessions. Those sessions stored
-    document.body.innerText per record (up to several MB each), which made
-    _modify_file() hold _file_lock long enough to time out extension requests.
+    from all approved vacancy records written by old sessions.
+
+    Runs synchronously before any background threads start, so holding
+    _file_lock here introduces zero contention. Delegates the write to
+    _write_json_atomic so a power fault mid-migration cannot corrupt the file.
     No-op when the file is already clean or does not exist.
-    Runs before any Flask/worker threads start, so no lock is needed.
     """
-    if not os.path.exists(APPROVED_FILE):
-        return
-    try:
-        with open(APPROVED_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if not any("description" in v for v in data):
+    with _file_lock:
+        if not os.path.exists(APPROVED_FILE):
             return
-        cleaned = [{k: val for k, val in v.items() if k != "description"} for v in data]
-        with open(APPROVED_FILE, "w", encoding="utf-8") as f:
-            json.dump(cleaned, f, ensure_ascii=False, indent=4)
-        print(f"[Migration]: Removed 'description' from {len(cleaned)} approved vacancy records.")
-    except Exception as e:
-        print(f"[Migration]: Could not strip descriptions from approved file: {e}")
+        try:
+            with open(APPROVED_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return   # unreadable on startup — let init_db() establish a fresh state
+
+        migrated = False
+        for item in data:
+            if "description" in item:
+                del item["description"]
+                migrated = True
+
+        if not migrated:
+            return
+
+        try:
+            _write_json_atomic(APPROVED_FILE, data)
+            print(f"[Migration]: Removed 'description' from {len(data)} approved vacancy records.")
+        except RuntimeError as exc:
+            print(f"[Migration]: {exc}")
 
 def init_db():
     """Создает пустые файлы баз данных, если они отсутствуют."""
@@ -88,37 +100,74 @@ def _load_file(filepath):
             print(f"[Хранилище]: Ошибка чтения {filepath}: {e}. Возвращён пустой список.")
             return []
 
-def _save_file(filepath, data):
-    """Записывает данные в файл в формате UTF-8."""
-    with _file_lock:
-        try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            print(f"[Ошибка сохранения]: Не удалось записать файл {filepath}. Причина: {e}")
+def _write_json_atomic(filepath: str, data) -> None:
+    """
+    Writes data to filepath using the write-to-temp → fsync → replace pattern.
 
-def _modify_file(filepath, mutate_fn):
+    MUST be called while _file_lock is already held by the caller.
+
+    Crash-safety guarantee: either the rename succeeds (new content visible) or
+    the original file is completely untouched.  The O_TRUNC truncation that
+    normally zeroes the destination file before writing is avoided entirely.
+
+    The temp file is created in the same directory as filepath so that
+    os.replace() is a same-partition rename — guaranteed atomic on POSIX/Win32.
     """
-    Атомарный read-modify-write под единым захватом _file_lock.
-    mutate_fn(data: list) -> list — чистая функция преобразования списка.
-    Устраняет TOCTOU-гонку между параллельными save/delete/clear операциями.
-    """
-    with _file_lock:
-        if not os.path.exists(filepath):
-            data = []
-        else:
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (json.JSONDecodeError, OSError) as e:
-                print(f"[Хранилище]: Ошибка чтения при модификации {filepath}: {e}. Начинаем с пустого списка.")
-                data = []
-        data = mutate_fn(data)
+    dir_name = os.path.dirname(os.path.abspath(filepath))
+    os.makedirs(dir_name, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix="jh_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+            f.flush()
+            os.fsync(f.fileno())   # flush OS kernel buffers to physical storage
+        os.replace(tmp_path, filepath)
+    except Exception as exc:
         try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise RuntimeError(f"Atomic write failed for {filepath}: {exc}")
+
+
+def _save_file(filepath, data):
+    """Atomically writes data to a JSON file (power-failure safe)."""
+    with _file_lock:
+        try:
+            _write_json_atomic(filepath, data)
         except Exception as e:
             print(f"[Хранилище]: Не удалось записать {filepath}: {e}")
+
+
+def _modify_file(filepath: str, mutation_callback) -> bool:
+    """
+    Atomically reads, mutates, and writes a JSON database file.
+
+    mutation_callback(data: list) -> list — pure transformation function.
+    Eliminates the TOCTOU race between concurrent save/delete/clear operations
+    and protects against data loss on crash (write-copy-replace pattern).
+
+    Returns True on success, False on I/O failure.  Callers MUST check the
+    return value before updating in-memory URL sets — if the disk write fails
+    the sets must NOT be mutated so they stay in sync with physical storage.
+    """
+    with _file_lock:
+        current_data = []
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    current_data = json.load(f)
+            except Exception:
+                current_data = []   # recover from corruption: start fresh
+
+        mutated_data = mutation_callback(current_data)
+
+        try:
+            _write_json_atomic(filepath, mutated_data)
+            return True
+        except RuntimeError as exc:
+            print(f"[Хранилище]: {exc}")
+            return False
 
 def load_config():
     """Безопасно загружает расширенную конфигурацию приложения с дефолтными значениями."""
@@ -162,7 +211,10 @@ def load_config():
             "Ollama": "http://localhost:11434",
             "LM Studio": "http://localhost:1234"
         },
-        "language": "en"
+        "language": "en",
+        # Structured hotkey dict — replaces the legacy "capture_hotkey" string.
+        # Edited via the visual selector in AI Settings (no raw text entry).
+        "hotkey": {"mod1": "ctrl", "mod2": "shift", "key": "X"},
     }
     
     if not os.path.exists(CONFIG_FILE):
@@ -197,9 +249,6 @@ def load_config():
                     if model == "gemini-3.1-flash":
                         gemini_active[idx] = "gemini-3.1-flash-lite"
                         migrated = True
-                    elif model == "gemini-3.0-pro":
-                        gemini_active[idx] = "gemini-3.1-pro"
-                        migrated = True
                 if migrated:
                     seen = set()
                     user_config["active_models"]["Gemini"] = [x for x in gemini_active if not (x in seen or seen.add(x))]
@@ -213,6 +262,30 @@ def load_config():
                     user_config["active_models"]["Ollama"] = ["local-model"]
                     _save_file(CONFIG_FILE, user_config)
                     print("[Сборщик-Миграция]: Конфигурация Ollama обновлена до local-model.")
+
+            # Migrate legacy "capture_hotkey" pynput string → structured "hotkey" dict.
+            # Runs once; the old key is removed so this branch is never entered again.
+            if "capture_hotkey" in user_config and not isinstance(
+                user_config.get("hotkey"), dict
+            ):
+                old_str = user_config.pop("capture_hotkey", "")
+                alias   = {"control": "ctrl", "cmd": "win", "command": "win", "super": "win"}
+                parts   = [p.strip().strip("<>").lower() for p in old_str.split("+") if p.strip()]
+                mods    = []
+                key     = ""
+                for p in parts:
+                    p = alias.get(p, p)
+                    if p in ("ctrl", "alt", "shift", "win"):
+                        mods.append(p)
+                    elif len(p) == 1 and p.isalpha():
+                        key = p.upper()
+                user_config["hotkey"] = {
+                    "mod1": mods[0] if mods else "ctrl",
+                    "mod2": mods[1] if len(mods) > 1 else "shift",
+                    "key":  key or "X",
+                }
+                _save_file(CONFIG_FILE, user_config)
+                print("[Migration]: 'capture_hotkey' string → 'hotkey' dict completed.")
 
             return user_config
     except json.JSONDecodeError as e:
@@ -265,10 +338,10 @@ def save_approved_vacancy(company, title, url, cover_letter="", description=""):
     # per vacancy, is never read back from the file, and would make _modify_file()
     # progressively slower with each new record, causing request timeouts at scale.
     new_vacancy = {"company": company, "title": title, "url": url, "cover_letter": cover_letter}
-    _modify_file(APPROVED_FILE, lambda data: data + [new_vacancy])
-    if url and url != "#":
-        with _url_lock:
-            _approved_urls.add(url)
+    if _modify_file(APPROVED_FILE, lambda data: data + [new_vacancy]):
+        if url and url != "#":
+            with _url_lock:
+                _approved_urls.add(url)
 
 def save_rejected_vacancy(company, title, url, reason=""):
     """Атомарно добавляет отклоненную вакансию в журнал (макс 50 записей)."""
@@ -276,10 +349,10 @@ def save_rejected_vacancy(company, title, url, reason=""):
     def _append_capped(data):
         data.append(new_vacancy)
         return data[-50:] if len(data) > 50 else data
-    _modify_file(REJECTED_FILE, _append_capped)
-    if url and url != "#":
-        with _url_lock:
-            _rejected_urls.add(url)
+    if _modify_file(REJECTED_FILE, _append_capped):
+        if url and url != "#":
+            with _url_lock:
+                _rejected_urls.add(url)
 
 def get_all_approved():
     """Возвращает список всех сохраненных вакансий."""
@@ -291,27 +364,27 @@ def get_all_rejected():
 
 def delete_vacancy_by_url(url):
     """Атомарно удаляет одобренную вакансию по URL."""
-    _modify_file(APPROVED_FILE, lambda data: [v for v in data if v.get("url") != url])
-    with _url_lock:
-        _approved_urls.discard(url)
+    if _modify_file(APPROVED_FILE, lambda data: [v for v in data if v.get("url") != url]):
+        with _url_lock:
+            _approved_urls.discard(url)
 
 def delete_rejected_by_url(url):
     """Атомарно удаляет отклоненную вакансию по URL."""
-    _modify_file(REJECTED_FILE, lambda data: [v for v in data if v.get("url") != url])
-    with _url_lock:
-        _rejected_urls.discard(url)
+    if _modify_file(REJECTED_FILE, lambda data: [v for v in data if v.get("url") != url]):
+        with _url_lock:
+            _rejected_urls.discard(url)
 
 def clear_all_vacancies():
     """Атомарно очищает базу данных одобренных."""
-    _modify_file(APPROVED_FILE, lambda _: [])
-    with _url_lock:
-        _approved_urls.clear()
+    if _modify_file(APPROVED_FILE, lambda _: []):
+        with _url_lock:
+            _approved_urls.clear()
 
 def clear_all_rejected():
     """Атомарно очищает базу данных отклоненных."""
-    _modify_file(REJECTED_FILE, lambda _: [])
-    with _url_lock:
-        _rejected_urls.clear()
+    if _modify_file(REJECTED_FILE, lambda _: []):
+        with _url_lock:
+            _rejected_urls.clear()
 
 def vacancy_url_in_approved(url: str) -> bool:
     """O(1) check against the live in-memory set. Only _url_lock — never waits on I/O."""

@@ -11,37 +11,46 @@
 <h1 align="center">Job Hunter AI</h1>
 
 <p align="center">
-  <strong>Your personal AI recruiter, working for you 24/7</strong>
+  <strong>Your personal AI recruiter — one hotkey, any browser, zero extensions</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-3670A0?style=flat&logo=python&logoColor=ffdd54" alt="Python">
-  <img src="https://img.shields.io/badge/Release-v2.0.2-00B981?style=flat" alt="Release">
-  <img src="https://img.shields.io/badge/Platform-Windows-0078D4?style=flat&logo=windows" alt="Platform">
+  <img src="https://img.shields.io/badge/Release-v3.0.0-00B981?style=flat" alt="Release">
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-0078D4?style=flat&logo=linux&logoColor=white" alt="Platform">
   <img src="https://img.shields.io/badge/License-Non--Commercial-EF4444?style=flat" alt="License">
 </p>
 
 ---
 
-**Job Hunter AI** is not just a script. It's a full-featured AI assistant that analyzes job listings directly in your browser, ruthlessly filters out garbage, and writes targeted cover letters — while you focus on actually preparing for interviews.
+<p align="center">
+  <video src="assets/movie.mov" controls width="700"></video>
+</p>
+
+---
+
+**Job Hunter AI** is a standalone desktop app that analyzes job postings, ruthlessly filters out garbage (scams, MLM, 60 h/week slavery), and writes targeted cover letters — all triggered by a single global hotkey, in any browser, with zero additional software required.
+
+**v3.0.0 dropped the Chrome extension entirely.** Press one key. The rest is automatic.
 
 <br>
 
 <table width="100%">
   <tr>
     <td width="60%" valign="top">
-      <h3>⚡ Why this will change your routine</h3>
+      <h3>⚡ Why this changes your routine</h3>
       <ul>
         <li>💰 <b>100% Free</b> — runs on your own API keys, including the free Gemini tier</li>
-        <li>🛡️ <b>Hard filter — up to 60%</b> — scam, MLM, 60h/week slavery, and info-business don't get through</li>
-        <li>✍️ <b>Cover letter in seconds</b> — a personalized response matched to the job, in your app language</li>
-        <li>🌐 <b>Cloud or your PC</b> — Gemini, GPT-5, Claude 4 <i>or</i> locally via Ollama / LM Studio</li>
-        <li>🔒 <b>Full privacy</b> — with local AI, your data never leaves your machine</li>
+        <li>🔑 <b>One hotkey — any browser</b> — Chrome, Firefox, Edge, Brave, any site</li>
+        <li>🛡️ <b>Hard filter up to 60%</b> — scam, MLM, toxic conditions, info-business don't get through</li>
+        <li>✍️ <b>Cover letter in seconds</b> — personalized to the real pain points of the employer</li>
+        <li>🌐 <b>Cloud or your PC</b> — Gemini, GPT-5, Claude 4 <i>or</i> Ollama / LM Studio (offline)</li>
+        <li>🔒 <b>Full privacy</b> — with local AI, nothing leaves your machine</li>
         <li>🌍 <b>EN / RU</b> — interface language = letter language and PDF resume parsing</li>
       </ul>
     </td>
     <td width="40%" align="center" valign="middle">
-      <img src="assets/1.png" width="320" alt="Job Hunter AI Interface">
+      <img src="assets/1.png" width="216" alt="Job Hunter AI Interface">
     </td>
   </tr>
 </table>
@@ -51,9 +60,57 @@
 
 ## ⚙️ Quick Start
 
-Install the desktop application and the Chrome extension. Full step-by-step guide:
+> No Chrome extension. No Flask server. No port conflicts. Just run the app.
 
-[![Installation Guide](https://img.shields.io/badge/⚙️_Setup-Read_the_guide-00B981?style=for-the-badge&logo=readme)](install/INSTALL.md)
+**1.** Download the latest release and launch **Job Hunter AI.exe** (Windows) or `job-hunter-ai` (Linux).
+
+**2.** Open Settings → enter your AI provider API key.
+
+**3.** Open any job posting in any browser.
+
+**4.** Press **Ctrl+Shift+J** — the app selects all, copies the text, and submits it to the AI pipeline automatically.
+
+**5.** A toast notification appears in ~15 seconds: accepted with a cover letter, or rejected with the reason.
+
+The app lives in the **system tray** and runs silently in the background.
+
+[![Installation Guide](https://img.shields.io/badge/⚙️_Setup-Full_installation_guide-00B981?style=for-the-badge&logo=readme)](install/INSTALL.md)
+
+<hr>
+
+## 🔄 How it works
+
+```
+  Any browser, any site              Job Hunter AI (system tray)
+  ─────────────────────              ────────────────────────────
+  1. Open job posting
+                          Ctrl+Shift+J
+  2. ──────────────────────────────────►  BrowserCaptureEngine
+                                          pynput GlobalHotKeys
+  3.  ◄── Ctrl+A (select all) ──────────
+      ◄── Ctrl+C (copy text)  ──────────
+
+  4.  clipboard text ────────────────►  pyperclip.paste()
+                                        MD5 hash dedup check
+                                        queue.put(text, url)
+
+  5.                                    extract_relevant_context()
+                                        keyword scoring · budget packing
+
+                                        ┌─ Stage 1: Filter ─────────┐
+                                        │  Scam · MLM · Toxic       │
+                                        │  >45 h/week · Geo rule    │
+                                        └───────────┬───────────────┘
+                                          REJECTED  │  APPROVED
+                                                    ▼
+                                        ┌─ Stage 2: Letter ─────────┐
+                                        │  Personalized cover letter│
+                                        │  no filler, no templates  │
+                                        └───────────────────────────┘
+
+  6.                           ◄────  Toast notification
+                                      Vacancy card in the UI
+```
 
 <hr>
 
@@ -65,122 +122,133 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
 <table width="100%">
   <tr>
     <td width="60%" valign="top">
-      <b>🧠 Multi-engine AI cascade with Failover</b><br>
-      Automatic switching between Gemini 3.5, GPT-5, Claude 4, DeepSeek, and local models. If the primary provider is unavailable — the next one takes over without dropping the task.
+      <b>🤖 BrowserCaptureEngine — works with any browser</b><br>
+      A global hotkey listener (pynput) runs as a daemon thread. When triggered, it simulates Ctrl+A → Ctrl+C in the currently active browser window, reads the clipboard via pyperclip, and submits the text to the processing queue. Hardware Virtual Key codes (layout-independent) ensure the hotkey fires correctly on any keyboard layout — Cyrillic, QWERTY, Dvorak.
       <br><br>
-      <b>🏠 Local AI — no internet, no API keys</b><br>
-      Native HTTP integration with Ollama and LM Studio. A background probe monitors server availability and reflects status in the UI (neon cyan / muted red). <code>LOCAL_SAFE_PARAMS</code> compensate for artifacts in quantized 4-bit models.
+      <b>🔲 System Tray — always on, never in the way</b><br>
+      pystray hosts the app in the notification area. Right-click opens a context menu: show window, toggle active, exit. The main window can be hidden while the capture engine continues running.
     </td>
     <td width="40%" align="center" valign="middle">
-      <img src="assets/2.png" width="320" alt="Job Analysis">
+      <img src="assets/2.png" width="320" alt="System Tray">
+    </td>
+  </tr>
+
+  <tr>
+    <td width="60%" valign="top">
+      <b>🧠 Multi-engine AI cascade with Failover</b><br>
+      Automatic switching between Gemini, GPT-5, Claude 4, DeepSeek, and local models. If the primary provider is unavailable — the next one takes over without losing the task.
+      <br><br>
+      <b>🏠 Local AI — no internet, no API keys</b><br>
+      Native HTTP integration with Ollama and LM Studio. A background probe monitors server availability and reflects status in the UI. <code>LOCAL_SAFE_PARAMS</code> compensate for artifacts in quantized 4-bit models.
+    </td>
+    <td width="40%" align="center" valign="middle">
+      <img src="assets/3.png" width="227" alt="AI Cascade">
     </td>
   </tr>
 
   <tr>
     <td width="60%" valign="top">
       <b>🛡️ Two-stage AI analysis</b><br>
-      <b>Stage 1 — Filter:</b> Detects scam, MLM, toxic work conditions (>45h/week, uncompensated night shifts, info-business, mass hiring). Plus geographic compliance — filters out offers that prohibit remote work from your country.<br>
-      <b>Stage 2 — Cover letter:</b> Only for approved listings. A targeted response addressing the employer's real pain points — no filler, no templates.
+      <b>Stage 1 — Filter:</b> Detects scam, MLM, toxic work conditions (>45 h/week, uncompensated overtime, info-business, mass hiring). Plus geographic compliance — filters offers that prohibit remote work from your country.<br>
+      <b>Stage 2 — Cover letter:</b> Only for approved listings. A targeted response addressing the employer's real requirements — no filler, no templates.
       <br><br>
-      <b>🔧 5-level JSON repair pipeline</b><br>
-      The parser automatically recovers malformed LLM responses: strips Markdown wrappers, cleans trailing commas, fixes boolean literals and broken quotes. No result is ever lost due to model formatting quirks.
+      <b>📐 Scoring pipeline</b><br>
+      <code>extract_relevant_context()</code> scores each paragraph by keyword density and length, greedily selects the most relevant content within a char budget, then restores document order (Narrative Rule) so the LLM reads chronological text, not a relevance-sorted shuffle.
     </td>
     <td width="40%" align="center" valign="middle">
-      <img src="assets/3.png" width="320" alt="Filtering">
+      <img src="assets/4.png" width="267" alt="Analysis">
     </td>
   </tr>
 
   <tr>
     <td width="60%" valign="top">
       <b>📄 Resume history and PDF import</b><br>
-      The 📂 button in the main window lets you save multiple resume versions and switch between them in one click. Direct PDF import with AI text extraction is supported.
+      Save multiple resume versions and switch between them in one click. Direct PDF import with AI text extraction is supported.
       <br><br>
-      <b>🔔 Telegram-style toast notifications</b><br>
-      No system dialogs. Animated notifications slide in from the bottom of the screen, respect the Windows taskbar height, and never block the interface. Left color bar: neon cyan for success, bright red for alerts. Audio plays in a dedicated thread.
+      <b>🔔 Thread-safe Telegram-style toasts</b><br>
+      Animated notifications slide from the bottom of the screen, respect the taskbar height, and never block the interface. A new notification instantly replaces the old one without race conditions (<code>_notification_lock</code> + instance-bound fade closure). Audio plays in a dedicated daemon thread.
     </td>
     <td width="40%" align="center" valign="middle">
-      <img src="assets/4.png" width="320" alt="Interface">
-    </td>
-  </tr>
-
-  <tr>
-    <td width="60%" valign="top">
-      <b>🌍 Full localization (EN / RU)</b><br>
-      Language is switched in settings and saved to <code>config.json</code>. The entire interface — buttons, messages, errors, counters — passes through a single <code>jh_i18n.py</code> module with named variable substitution.
-      <br><br>
-      <b>⚡ Flicker-free smart UI</b><br>
-      Child windows open at alpha=0.0, compute their coordinates for the current DPI, and appear only after the frame is fully rendered — no position jumps, no flickering. The vacancy list updates incrementally: only changed cards are re-rendered. Dark title bar and icon are set via Win32 API.
-    </td>
-    <td width="40%" align="center" valign="middle">
-      <img src="assets/5.png" width="320" alt="Results">
+      <img src="assets/5.png" width="265" alt="Notifications">
     </td>
   </tr>
 </table>
-
-<br>
 
 </details>
 
 ---
 
 <details>
-<summary>🗺️ Architecture diagram (How it works under the hood)</summary>
+<summary>🗺️ Architecture diagram</summary>
 <br>
 <pre>
- ┌────────────────────────────────────────┐
- │            CHROME BROWSER              │
- │  (User clicks in the extension)        │
- │  Text truncated to 50 000 chars        │
- └───────────────────┬────────────────────┘
-                     │ HTTP POST ( vacancy_data )
-                     ▼
- ┌────────────────────────────────────────┐
- │          LOCAL FLASK API               │  [main_app.py]
- │  threaded=True · parallel workers      │  _flask_ready Event → "STARTING…" UI
- │  O(1) dedup → queue.put() (no lock)   │  Zombie killer on port 5000
- └───────────────────┬────────────────────┘
-                     │ Instant enqueue (.put)
-                     ▼
- ┌────────────────────────────────────────┐
- │        THREAD-SAFE QUEUE               │  [queue.Queue]
- │   15s Timer | Rate Limit Guard         │  Countdown status bar
- │   Worker-side dedup safety net         │
- └───────────────────┬────────────────────┘
-                     │ Background thread → task
-                     ▼
- ┌────────────────────────────────────────┐
- │        MULTI-ENGINE AI CASCADE         │  [src/jh_ai_engine.py]
- │  Gemini 3.5 ➔ GPT-5 ➔ Claude 4 ➔      │  Failover Chain
- │  DeepSeek ➔ Ollama ➔ LM Studio        │  5-level JSON repair
- │                                        │  Exception hierarchy
- └──────────┬─────────────────┬───────────┘  LOCAL_SAFE_PARAMS
-            │                 │
-    ┌───────▼───────┐  ┌──────▼──────────┐
-    │    STAGE 1    │  │    STAGE 2      │
-    │  Hard filter  │  │  Cover letter   │
-    │   (up to 60%) │  │  generation     │
-    │ Toxic cond.   │  │  (approved only)│
-    │ Geo-compliance│  └──────┬──────────┘
-    └──────┬────────┘         │
-           │ REJECTED         │ APPROVED
-           └────────┬─────────┘
-                    ▼
- ┌────────────────────────────────────────┐
- │          JH STORAGE MANAGER            │  [src/jh_storage_manager.py]
- │  _file_lock  — disk I/O only           │  Always-live URL sets in memory
- │  _url_lock   — set mutations only      │  O(1) dedup · no disk read on check
- │    AppData/Roaming/Job Hunter AI/      │  Resume history | PDF import
- └───────────────────┬────────────────────┘  Log: max 50 entries
-                     ▼
- ┌────────────────────────────────────────┐
- │          JH UI + NOTIFICATIONS         │  [src/jh_results_ui.py]
- │  Signature cache | HiDPI | Dark Win32  │  [src/jh_notifications.py]
- │  Hotkeys (RU/EN keyboard layouts)      │  Toast animations | Audio thread
- └─────────────────┬──────────────────────┘
-                   │
-        ┌──────────▼──────────┐
-        │   jh_i18n.py (EN/RU)│  Declarative localization
-        └─────────────────────┘
+ ┌──────────────────────────────────────────────────────────────────┐
+ │           ANY JOB POSTING  ·  ANY BROWSER  ·  Ctrl+Shift+J      │
+ └──────────────────────────────────┬───────────────────────────────┘
+                                    │
+                  ┌─────────────────▼─────────────────┐
+                  │       BrowserCaptureEngine         │  jh_automation.py
+                  │                                    │
+                  │  pynput.keyboard.GlobalHotKeys      │  daemon thread
+                  │  ① focus browser window            │
+                  │  ② Ctrl+A  — select all            │  VK codes (layout-
+                  │  ③ Ctrl+C  — copy to clipboard     │  independent):
+                  │  ④ pyperclip.paste()               │  Win32 / X11 / macOS
+                  │  ⑤ MD5 hash → dedup check          │
+                  │  ⑥ queue.put(text, url)            │  Wayland guard:
+                  │                                    │  PlatformSecurity-
+                  │  AUTOMATION_AVAILABLE fallback      │  Exception +
+                  │  for missing pynput/pyperclip       │  graceful degradation
+                  └─────────────────┬─────────────────┘
+                                    │ thread-safe queue
+                  ┌─────────────────▼─────────────────┐
+                  │           AI ENGINE                │  jh_ai_engine.py
+                  │                                    │
+                  │  extract_relevant_context()        │
+                  │  ├─ normalize whitespace           │  Scoring:
+                  │  ├─ drop nav-noise lines           │  keyword hits
+                  │  ├─ score by _VACANCY_KW_RE        │  + len / 600 bonus
+                  │  ├─ greedy budget select           │
+                  │  ├─ Narrative Rule (doc order)     │  pack_paragraphs_
+                  │  └─ pack_paragraphs_to_budget()    │  to_budget(): strict
+                  │                                    │  delimiter-aware
+                  │  Stage 1  12 000 chars  → Filter   │  budget invariant
+                  │  Stage 2   8 000 chars  → Letter   │
+                  │                                    │
+                  │  Gemini → GPT-5 → Claude 4         │  Failover Chain
+                  │  → DeepSeek → Ollama → LM Studio   │  Exp. Backoff
+                  │  5-level JSON repair pipeline      │
+                  └──────────┬─────────────┬──────────┘
+                    REJECTED │             │ APPROVED
+                             │             ▼
+                             │   ┌─────────────────────┐
+                             │   │  Cover letter ready  │
+                             │   └─────────┬───────────┘
+                             │             │
+                  ┌──────────▼─────────────▼──────────┐
+                  │         STORAGE MANAGER            │  jh_storage_manager.py
+                  │                                    │
+                  │  _write_json_atomic()              │  Write-Copy-Replace:
+                  │  mkstemp → dump → flush →          │  temp file on same
+                  │  fsync → os.replace()              │  partition → atomic
+                  │                                    │  at OS level
+                  │  _file_lock  — disk I/O only       │
+                  │  _url_lock   — set mutations only  │  O(1) dedup:
+                  │  always-live _approved_urls /      │  no disk read
+                  │  _rejected_urls (populated at      │  on hot path
+                  │  startup)                          │
+                  └─────────────────┬─────────────────┘
+                                    │
+                  ┌─────────────────▼─────────────────┐
+                  │   DESKTOP UI  +  SYSTEM TRAY       │
+                  │                                    │
+                  │  CustomTkinter  ·  pystray          │
+                  │  Toast: _notification_lock +        │
+                  │  _fade_out_instance (instance-      │
+                  │  bound closure, race-safe)          │
+                  │  HiDPI · Dark Win32 title bar       │
+                  │  EN / RU  (jh_i18n.py)             │
+                  └────────────────────────────────────┘
 </pre>
 </details>
 
@@ -192,15 +260,16 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
 
 | Layer | Tools |
 |---|---|
-| **GUI & OS** | `customtkinter` · `Pillow` · `ctypes` Win32 API — dark title bar, `WM_SETICON`, DPI Awareness, cross-layout hotkeys |
-| **Localization** | `jh_i18n.py` — declarative EN/RU system with named variable substitution via `tr(key, **kwargs)` |
-| **Local API** | `Flask` · `flask-cors` · `threading` · `queue.Queue` — thread-safe webhook receiver from Chrome |
-| **AI Cascade** | **Gemini 3.5/3.0** · **GPT-5 / o3** · **Claude 4** · **DeepSeek** (chat / reasoner) · **Ollama** · **LM Studio** |
-| **Resilience** | Failover Chain · Exponential Backoff · 5-level JSON parser · Exception hierarchy (`AINetworkError`, `AILocalServerError`, `AITimeoutError`, `AIAuthError`, `AIRateLimitError`) |
-| **Local AI** | HTTP integration Ollama / LM Studio · `LOCAL_SAFE_PARAMS` · `MIN_TOKENS_PER_SEC` metric · Async status probe |
-| **Notifications** | `jh_notifications.py` — custom Toast with slide/fade animation, color coding, and audio in a dedicated thread |
-| **Storage** | JSON in `%APPDATA%` · Resume history · PDF import with AI text extraction · Auto-cleanup logs (50 entry limit) |
-| **Build** | `PyInstaller` · `jh_version.py` (single version source → window titles + VERSIONINFO .exe) · `Self-Healing Refactor` in `build_exe.py` |
+| **GUI & Tray** | `customtkinter` · `pystray` · `Pillow` · `ctypes` Win32 API (dark title bar, `WM_SETICON`, DPI Awareness) |
+| **Hotkey Capture** | `pynput.keyboard.GlobalHotKeys` · hardware VK codes (layout-independent) · `pyperclip` clipboard |
+| **Platform Guard** | `PlatformSecurityException` · Wayland zero-trust guard · graceful degradation on unsupported sessions |
+| **Localization** | `jh_i18n.py` — declarative EN/RU with `tr(key, **kwargs)` named variable substitution |
+| **AI Cascade** | **Gemini 2.5** · **GPT-5 / o3** · **Claude 4** · **DeepSeek** (chat / reasoner) · **Ollama** · **LM Studio** |
+| **Scoring Pipeline** | `extract_relevant_context()` · `_VACANCY_KW_RE` keyword scoring · Narrative Rule · `pack_paragraphs_to_budget()` |
+| **Resilience** | Failover Chain · Exponential Backoff · 5-level JSON repair · `AINetworkError` / `AITimeoutError` / `AIAuthError` / `AIRateLimitError` hierarchy |
+| **Storage** | `_write_json_atomic()` Write-Copy-Replace + `fsync` · `_file_lock` + `_url_lock` · O(1) dedup · always-live URL sets |
+| **Notifications** | `_notification_lock` + instance-bound `_fade_out_instance` · slide / fade animation · `winsound` in daemon thread |
+| **Build** | `PyInstaller` · `build_exe.py` (Windows + Inno Setup) · `build_linux.py` (Linux X11) · `jh_version.py` (single version source) |
 
 </details>
 
@@ -208,58 +277,77 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
 
 ## 🚀 Changelog
 
-<details>
-<summary><b>📦 v2.0.2 — Bug Fix Release (Current)</b></summary>
+<details open>
+<summary><b>🟢 v3.0.0 — Standalone. No extension required. (Current)</b></summary>
 
-* **[Storage]** Complete rewrite of the concurrency model in `jh_storage_manager.py`. Two independent, never-nested locks replace the old single-lock design: `_file_lock` (held only during `_modify_file()` read-modify-write cycles on disk) and `_url_lock` (held for microseconds on in-memory `set` mutations only). Dedup is now O(1) against always-live `_approved_urls` / `_rejected_urls` sets populated at startup — zero disk I/O per check.
-* **[Storage]** Removed the `description` field (raw `document.body.innerText`, up to several MB per vacancy) from approved records. AI analysis works on the in-memory request payload — the field was never read back from storage. As records accumulated, the bloated file held `_file_lock` for 8+ seconds, timing out all concurrent webhook requests.
-* **[Storage]** One-time startup migration strips the legacy `description` field from existing approved records before Flask or the worker thread start (`_migrate_strip_description()`). Without this, the storage fix would only benefit new sessions.
-* **[Enqueue]** Removed `_enqueue_lock` and `_in_flight_urls` from `enqueue_vacancy()`. The previous triple-check dedup system serialized all 24 parallel Flask threads behind a single lock — one vacancy per second could be acknowledged under rapid clicks. Replaced with a single O(1) storage dedup check followed by unconditional `queue.put()`. Worker thread performs a lightweight safety dedup pass to handle rare concurrent-submit races.
-* **[Startup]** Fixed Flask startup race: the UI previously set `is_active = True` before Flask finished binding to port 5000. Extension clicks during the startup window returned `ERR_CONNECTION_REFUSED`. Fixed with `threading.Event` (`_flask_ready`): Flask signals the event immediately after `make_server()` succeeds, UI polls non-blocking via `self.after()` — zero socket I/O on the main thread. Button shows "STARTING…" and is disabled until the server is ready.
-* **[Extension]** Removed `tab.status === 'loading'` guard. Modern SPAs (LinkedIn, HH.ru, Greenhouse) never set `status` to `'complete'` due to background requests — the check blocked vacancy collection on fully-rendered pages.
-* **[Extension]** Page text truncated to 50 000 characters before sending. Full `document.body.innerText` can reach several MB; under OBS or heavy system load, 24 Flask threads competing for the GIL during `json.loads()` caused the last request in the batch to stall 5+ seconds and hit the 8 s fetch timeout.
+<br>
+
+> **This release drops the Chrome extension permanently.**
+> The extension was useful scaffolding in early versions but created real friction: manual installation, permission prompts, Manifest V3 compatibility headaches, and a hard dependency on Chrome. v3.0.0 replaces the entire input pipeline with a global hotkey that works in any browser, any OS, with nothing extra to install.
+
+**Architecture & Features**
+
+* **[Architecture]** Removed the Chrome extension and the local Flask webhook server. The new input path: `pynput.GlobalHotKeys` → `Ctrl+A / Ctrl+C` simulation → `pyperclip.paste()` → `queue.put()`. Zero open ports, zero browser-specific code.
+* **[Automation]** New `BrowserCaptureEngine` (`jh_automation.py`): global hotkey listener in a daemon thread, configurable hotkey string, graceful `AUTOMATION_AVAILABLE` fallback when pynput/pyperclip are not installed.
+* **[Automation]** Layout-independent VK keycodes: Windows uses Win32 Virtual Key codes (VK_A = 65, VK_C = 67, VK_L = 76), Linux/X11 uses hardware keycodes (A = 38, C = 54, L = 46), macOS uses kVK constants. Hotkeys fire correctly regardless of active keyboard layout.
+* **[Platform]** Official Linux support (X11). `build_linux.py` added with Linux-specific PyInstaller hidden imports for pynput X11 backends (`pynput._util.xorg`, `pynput.keyboard._xorg`) and pystray GTK backend.
+* **[Platform]** Wayland zero-trust guard: `enforce_linux_subsystem_guard()` checks `XDG_SESSION_TYPE` and `WAYLAND_DISPLAY`. Raises `PlatformSecurityException`; caught in `BrowserCaptureEngine.start()` — app continues without the macro feature and prints a clear remediation message (switch to GNOME on Xorg).
+* **[Tray]** System tray icon via `pystray` — app runs silently in the notification area; right-click menu: show window / toggle active / exit.
+* **[AI]** New scoring pipeline: `extract_relevant_context()` replaces `preprocess_vacancy_text()`. Seven steps: normalize whitespace → drop nav-noise lines (≤2 words AND ≤25 chars, no keyword match) → split on `"\n\n"` → score by `_VACANCY_KW_RE` hits + `min(len / 600, 2.0)` → greedy budget selection (score-descending) → Narrative Rule (restore document order) → `pack_paragraphs_to_budget()`. Stage 1 (12 000 chars) and Stage 2 (8 000 chars) each call the pipeline independently — no context drift between stages.
+* **[AI]** `pack_paragraphs_to_budget()`: strict delimiter-aware packer. The hard invariant `len(result) ≤ max_chars` is enforced at every step, including accounting for `len(delimiter)` only from the second paragraph onward. Oversized paragraphs are skipped; the loop continues to collect smaller ones.
+* **[Storage]** `_write_json_atomic()`: Write-Copy-Replace with `fsync`. `tempfile.mkstemp(dir=same_partition)` → `json.dump` → `f.flush()` → `os.fsync()` → `os.replace()`. The live file is never opened with `O_TRUNC`. All three write paths (`_save_file`, `_modify_file`, `_migrate_strip_description`) now delegate to this function.
+* **[Notifications]** Thread-safe toast: `_notification_lock` guards `_toast_ref` mutations. `_fade_out_instance` captures `toast` directly (not the global ref) — concurrent notifications can't corrupt each other's fade animation. Nullifies the global ref only if `_toast_ref[0] is toast` (identity check, not equality).
+* **[Build]** `build_exe.py`: fixed `logo.png` path from project root to `assets/logo.png`. `installer.iss`: removed all extension-related blocks (`[Files]`, `[Icons]`, `[Run]`, `[CustomMessages]`). `build_linux.py`: new, mirrors `build_exe.py` with Linux-specific hidden imports, `--noconsole`, `os.chmod(0o755)`, and system dependency banner.
+
+**Bug fixes carried over from 2.0.2**
+
+* **[Fix]** Notification theme not applied at startup: `jh_notifications.apply_theme()` was called before the module was imported — a silent `NameError` swallowed by `except Exception` meant toast colors were always stuck at hardcoded defaults, ignoring the selected theme entirely.
+* **[Fix]** Gemini model config silently corrupted: the startup migration mapped `"gemini-3.0-pro"` → `"gemini-3.1-pro"`, but `"gemini-3.1-pro"` does not exist in `ALL_PROVIDERS_MODELS`. Any user with that model saved would silently lose it from the dropdown. The bogus migration clause was removed — `"gemini-3.0-pro"` is a valid model and needs no migration.
+* **[Fix]** Slow-model warning showed no threshold: `tr("warn_text", min_tps=12)` passed a named kwarg that had no `{min_tps}` placeholder in either EN or RU string. The value was silently discarded by the `except (KeyError, ValueError): pass` guard in `tr()`. Added `{min_tps}` to both locale strings.
+* **[Fix]** Icon and logo not found in dev mode: `_resolve_asset()` in `main_app.py` and hardcoded paths in `jh_results_ui.py` only searched the `src/` directory. `icon.ico` is at the project root and `logo.png` is under `assets/`. Both now search `src/` → project root → `assets/` → exe dir → `_MEIPASS`.
+* **[Cleanup]** Removed unused `ImageTk` import from `main_app.py` (`from PIL import Image, ImageTk` → `from PIL import Image`).
 
 </details>
 
 <details>
-<summary><b>📦 v2.0.1 — Major Update</b></summary>
+<summary><b>📦 v2.0.2 — Concurrency & Reliability Fix</b></summary>
 
-* **[Architecture]** Global refactor with `jh_` prefix, unified `jh_version.py` module, Self-Healing build via `build_exe.py`.
+* **[Storage]** Complete rewrite of the concurrency model. Two independent, never-nested locks: `_file_lock` (disk I/O only) and `_url_lock` (in-memory set mutations only). Always-live `_approved_urls` / `_rejected_urls` sets populated at startup — O(1) dedup, zero disk reads per check.
+* **[Storage]** Removed `description` field (raw `document.body.innerText`, up to several MB) from approved records. The bloated file held `_file_lock` for 8+ seconds, timing out all concurrent webhook requests.
+* **[Storage]** `_migrate_strip_description()`: one-time startup migration strips the legacy `description` field from all existing records before the server starts.
+* **[Enqueue]** Removed `_enqueue_lock` and `_in_flight_urls`. Replaced triple-check dedup (serializing all 24 Flask threads) with a single O(1) storage check + unconditional `queue.put()`. Worker-side safety dedup as backstop.
+* **[Startup]** Fixed Flask startup race via `threading.Event` (`_flask_ready`): button shows "STARTING…" until port 5000 is bound.
+* **[Extension]** Removed `tab.status === 'loading'` guard — SPAs never reach `'complete'`. Text truncated to 50 000 chars — prevents GIL contention under 24 concurrent workers.
+
+</details>
+
+<details>
+<summary><b>📦 v2.0.1 — Full Overhaul</b></summary>
+
+* **[Architecture]** Global `jh_` prefix refactor, unified `jh_version.py`, Self-Healing build in `build_exe.py`.
 * **[i18n]** Full interface localization (EN / RU) via `jh_i18n.py` with dynamic switching.
-* **[Engine]** Custom exception hierarchy for precise UI responses to network failures, timeouts, rate limits, and parse errors.
-* **[Engine]** 5-level cascading repair for malformed LLM JSON responses.
-* **[Engine]** Native integration with Ollama and LM Studio: safe generation parameters, speed monitoring, failover between local models.
-* **[Engine]** New filters: toxic work condition detection and geographic compliance.
-* **[UI]** Resume history 📂 with direct PDF import and AI text extraction.
-* **[UI]** Expanded model pool: Gemini 3.5/3.0, GPT-5, Claude 4, DeepSeek (chat/reasoner).
-* **[UI]** Async local server status indicator.
-* **[UI]** Smooth HiDPI window centering without flickering or micro-jumps.
-* **[UI]** Dark title bar and window icon via Win32 API.
-* **[UI]** Card signature caching — only changed cards are re-rendered.
-* **[Notifications]** Custom Toast notifications: animation, audio, color coding.
+* **[Engine]** Custom exception hierarchy, 5-level cascading JSON repair, Ollama / LM Studio integration with `LOCAL_SAFE_PARAMS`.
+* **[Engine]** Toxic work condition detection and geographic compliance filter.
+* **[UI]** Resume history with PDF import and AI text extraction. HiDPI centering, dark Win32 title bar, card signature caching.
+* **[Notifications]** Custom Toast: slide/fade animation, color coding, audio in a dedicated thread.
 
 </details>
 
 <details>
-<summary><b>📦 v1.2.0</b></summary>
+<summary><b>📦 v1.2.0 — Multi-Provider Engine</b></summary>
 
-* **[Engine]** Multi-model `BaseProvider` architecture (Gemini, OpenAI, Anthropic, DeepSeek).
-* **[Engine]** Failover Chain and automatic JSON repair.
-* **[UI]** Dark CustomTkinter interface with full High-DPI support.
-* **[UI]** Removed `grab_set()`, incremental list rendering.
-* **[API]** Queue timeout manager (15s) with status bar.
-* **[API]** Zombie-process killer on port 5000.
-* **[Build]** `src/` structure, self-healing build module.
+* `BaseProvider` architecture with Failover Chain and cascading JSON parser.
+* Dark CustomTkinter interface, full HiDPI support.
+* Queue timeout manager (15 s) with status bar.
 
 </details>
 
 <details>
-<summary><b>📦 v1.1.0</b></summary>
+<summary><b>📦 v1.1.0 — UI & Keyboard Layout</b></summary>
 
-* **[UI]** Quick-apply buttons ("Apply") in vacancy cards.
-* **[UI]** Fixed `Ctrl+V`, `Ctrl+C`, `Ctrl+A` hotkeys on Russian keyboard layout.
-* **[UI]** Smooth scrolling without graphical artifacts.
-* **[UI]** Auto-reset scroll position when switching filters.
+* Quick-apply buttons in vacancy cards.
+* Fixed `Ctrl+V`, `Ctrl+C`, `Ctrl+A` on Russian keyboard layout.
+* Smooth scrolling, auto-reset scroll on filter switch.
 
 </details>
 
@@ -270,40 +358,64 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
 <details>
 <summary><b>🟢 v1.1.0 — UI & Keyboard Layout (Done)</b></summary>
 
-- [x] UI optimization, scroll fix, hotkeys for Russian keyboard layout.
+- [x] Hotkeys on Russian layout, smooth scroll, auto-reset on filter switch.
 
 </details>
 
 <details>
 <summary><b>🟢 v1.2.0 — Multi-Provider (Done)</b></summary>
 
-- [x] Modular engine, Failover Chain, cascading JSON parser, AI control panel.
+- [x] Modular engine, Failover Chain, JSON repair, AI control panel.
 
 </details>
 
 <details>
 <summary><b>🟢 v2.0.1 — Full Overhaul (Done)</b></summary>
 
-- [x] Local AI via Ollama / LM Studio without API keys.
-- [x] Full EN/RU interface localization.
-- [x] Resume history and PDF import with AI text extraction.
-- [x] Toast notifications with animation and audio.
-- [x] HiDPI centering without flickering, dark Win32 title bar.
-- [x] Toxic condition detection and geographic filter.
-- [x] Self-Healing build, `jh_version.py`, refactor with `jh_` prefix.
+- [x] Local AI (Ollama / LM Studio), EN/RU localization, resume history, PDF import, HiDPI centering, toast notifications, toxic + geo filters.
 
 </details>
 
 <details>
-<summary><b>🟢 v2.0.2 — Bug Fix Release (Done)</b></summary>
+<summary><b>🟢 v2.0.2 — Concurrency Fix (Done)</b></summary>
 
-- [x] Complete rewrite of storage concurrency: two independent locks (`_file_lock` / `_url_lock`), always-live URL sets, O(1) dedup with zero disk I/O on the hot path.
-- [x] Removed `description` field from approved records — eliminates multi-MB file bloat that caused write timeouts under `_file_lock`.
-- [x] One-time startup migration strips legacy `description` from all existing records before the server starts (`_migrate_strip_description()`).
-- [x] Removed `_enqueue_lock` / `_in_flight_urls` — enqueue simplified to O(1) dedup + `queue.put()` with no thread serialization; worker-side safety dedup as backstop.
-- [x] Fixed Flask startup race via `threading.Event` (`_flask_ready`): button disabled with "STARTING…" state until port 5000 is bound.
-- [x] Removed `tab.status === 'loading'` check in extension — SPAs (LinkedIn, HH.ru) never reach `'complete'`; check blocked collection on fully-loaded pages.
-- [x] Extension text truncated to 50 000 chars — prevents GIL contention stall under 24 concurrent Flask workers on heavy system load.
+- [x] O(1) dedup, always-live URL sets, fixed startup race, removed `_in_flight_urls` serialization bottleneck.
+
+</details>
+
+<details open>
+<summary><b>🟢 v3.0.0 — Standalone App, No Extension (Done)</b></summary>
+
+- [x] Chrome extension dropped — global hotkey replaces the entire Flask webhook pipeline.
+- [x] `BrowserCaptureEngine`: pynput + pyperclip, layout-independent VK keycodes.
+- [x] System tray via pystray — app runs silently in the background.
+- [x] Official Linux (X11) support + `build_linux.py`.
+- [x] Wayland zero-trust guard with graceful degradation.
+- [x] `extract_relevant_context()`: keyword scoring, Narrative Rule, `pack_paragraphs_to_budget()`.
+- [x] `_write_json_atomic()`: Write-Copy-Replace + fsync — crash-safe storage across all write paths.
+- [x] Thread-safe toasts: `_notification_lock` + instance-bound fade closure.
+- [x] Fixed notification theme not applied at startup (silent `NameError` in `jh_notifications`).
+- [x] Fixed Gemini config migration mapping `"gemini-3.0-pro"` to a non-existent model.
+- [x] Fixed slow-model warning not showing the tokens/sec threshold (`{min_tps}` placeholder missing).
+- [x] Fixed icon and logo not found outside a packaged build (asset search now covers project root and `assets/`).
+
+</details>
+
+<details>
+<summary><b>🔵 v3.1.0 — macOS (Planned)</b></summary>
+
+- [ ] macOS support — kVK keycodes already implemented in `jh_automation.py`, needs end-to-end testing.
+- [ ] `build_mac.py` with `.app` bundle and `.dmg` packaging.
+
+</details>
+
+<details>
+<summary><b>🔵 v3.x — Quality of Life (Planned)</b></summary>
+
+- [ ] Configurable hotkey via Settings UI (no config.json editing).
+- [ ] Vacancy export to CSV / PDF report.
+- [ ] Statistics dashboard: acceptance rate, top rejection reasons, response timeline.
+- [ ] Telegram bot mode — send a vacancy URL via Telegram, receive the analysis in the chat.
 
 </details>
 
@@ -311,11 +423,9 @@ Install the desktop application and the Chrome extension. Full step-by-step guid
 
 ## 🤝 Support the project
 
-The project has reached its goals and is in a **stable state**.
-
-If something breaks — open an Issue on GitHub, critical bugs will be fixed.
-
 If the app helped you land a job — leave a star. It's free, and that's how good tools find the people who need them.
+
+If something breaks — open an Issue. Critical bugs will be fixed.
 
 <p align="center">
   <a href="https://github.com/eric-esoteric/job-hunter-ai">
@@ -326,5 +436,5 @@ If the app helped you land a job — leave a star. It's free, and that's how goo
 ---
 
 <p align="center">
-  <sub>Made for people who value their time · Non-Commercial · v2.0.2</sub>
+  <sub>Made for people who value their time · Non-Commercial · v3.0.0</sub>
 </p>

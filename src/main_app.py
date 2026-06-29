@@ -8,9 +8,7 @@ import time
 import webbrowser
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from PIL import Image, ImageTk
+from PIL import Image
 import jh_ai_engine
 import jh_storage_manager
 import jh_results_ui
@@ -23,7 +21,6 @@ from jh_i18n import tr
 # =====================================================================
 try:
     import ctypes
-    # Включаем DPI-Awareness, чтобы шрифты на экранах (2K/4K) были идеально четкими
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
 except Exception:
     try:
@@ -31,54 +28,181 @@ except Exception:
     except Exception:
         pass
 
-# Настройки путей к конфигурации
+# Пути к конфигурации
 APPDATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'Job Hunter AI')
 os.makedirs(APPDATA_DIR, exist_ok=True)
 CONFIG_FILE = os.path.join(APPDATA_DIR, "config.json")
-ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.ico")
-LOGO_PNG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
+
+# Иконки — ищем рядом с main_app.py (и при сборке PyInstaller — рядом с .exe)
+def _resolve_asset(name):
+    """Locate a bundled asset regardless of frozen/development context."""
+    src_dir    = os.path.dirname(os.path.abspath(__file__))
+    root_dir   = os.path.dirname(src_dir)
+    candidates = [
+        os.path.join(src_dir, name),                          # src/<name>
+        os.path.join(root_dir, name),                         # project root
+        os.path.join(root_dir, "assets", name),               # assets/<name>
+        os.path.join(os.path.dirname(sys.executable), name),  # next to python/exe
+        os.path.join(sys._MEIPASS, name) if hasattr(sys, "_MEIPASS") else "",
+    ]
+    for p in candidates:
+        if p and os.path.exists(p):
+            return p
+    return os.path.join(src_dir, name)
+
+ICON_PATH     = _resolve_asset("icon.ico")
+LOGO_PNG_PATH = _resolve_asset("logo.png")
 
 # Инициализируем локальную БД
 jh_storage_manager.init_db()
 
-# Цветовая неоновая космическая палитра
-COLOR_BG_DARK = "#090D14"       # Мягкий глубокий темный космос
-COLOR_CARD_BG = "#111622"       # Спокойный сине-серый фон карточек
-COLOR_INPUT_BG = "#171D2C"      # Пространство полей ввода / неактивных кнопок
-COLOR_CYAN_NEON = "#00D8C6"     # Благородный мягкий циан (лого/успех)
-COLOR_CYAN_HOVER = "#00A193"    # Глубокий бирюзовый (hover)
-COLOR_GOLD = "#E2A33C"          # Теплое золото туманности (ожидание/актив)
-COLOR_GOLD_HOVER = "#B3802F"    # Мягкий янтарный (hover)
-COLOR_RED = "#D24B4B"           # Приглушенный красный (опасность/удаление)
-COLOR_RED_HOVER = "#A83C3C"     # Глубокий вишневый (hover)
-COLOR_TEXT_MUTED = "#828D9A"     # Пыльно-серый текст
-COLOR_TEXT_LIGHT = "#E9EDF0"     # Комфортный белый звездный текст
+# Color palette — updated at runtime by apply_theme(); Cyber-Owl defaults shown
+COLOR_BG_DARK    = "#0E1520"
+COLOR_CARD_BG    = "#17202E"
+COLOR_INPUT_BG   = "#0E1520"
+COLOR_CYAN_NEON  = "#D4845A"
+COLOR_CYAN_HOVER = "#7DC8D4"
+COLOR_GOLD       = "#CFA554"
+COLOR_GOLD_HOVER = "#B08A3C"
+COLOR_RED        = "#C46870"
+COLOR_RED_HOVER  = "#A55560"
+COLOR_TEXT_MUTED = "#7A8899"
+COLOR_TEXT_LIGHT = "#C8D4E0"
+
+# ── Theme system ──────────────────────────────────────────────────────────────
+LOCAL_SETTINGS_FILE = os.path.join(APPDATA_DIR, "local_settings.json")
+
+THEMES = {
+    "Cyber-Owl": {
+        "bg":              "#0E1520",
+        "card_bg":         "#17202E",
+        "input_bg":        "#0E1520",
+        "text":            "#C8D4E0",
+        "text_muted":      "#7A8899",
+        "accent":          "#D4845A",
+        "accent_hover":    "#7DC8D4",
+        "accent_text":     "#0E1520",
+        "secondary_fg":    "#17202E",
+        "secondary_hover": "#1F2E42",
+        "secondary_text":  "#7DC8D4",
+        "danger":          "#C46870",
+        "danger_hover":    "#A55560",
+        "gold":            "#CFA554",
+        "gold_hover":      "#B08A3C",
+        "corner_radius":   8,
+        "fonts": {
+            "title":    ("Arial", 24, "bold"),
+            "subtitle": ("Arial", 12),
+            "section":  ("Arial", 13, "bold"),
+            "btn_lg":   ("Arial", 15, "bold"),
+            "btn_md":   ("Arial", 13, "bold"),
+            "btn_sm":   ("Arial", 11, "bold"),
+        },
+        "btn_primary_border":   0,
+        "btn_secondary_border": 0,
+        "btn_start_hover":      "#7DC8D4",
+        "icon_hover":           "#1F2E42",
+    },
+    "Hotline Miami": {
+        "bg":              "#000000",
+        "card_bg":         "#1A0022",
+        "input_bg":        "#1A0022",
+        "text":            "#00F0FF",
+        "text_muted":      "#00A0AA",
+        "accent":          "#E500FF",
+        "accent_hover":    "#00F0FF",
+        "accent_text":     "#000000",
+        "secondary_fg":    "#000000",
+        "secondary_hover": "#E500FF",
+        "secondary_text":  "#FF5E00",
+        "danger":          "#E500FF",
+        "danger_hover":    "#FF5E00",
+        "gold":            "#FF5E00",
+        "gold_hover":      "#E500FF",
+        "corner_radius":   0,
+        "fonts": {
+            "title":    ("Courier New", 24, "bold"),
+            "subtitle": ("Courier New", 12, "bold"),
+            "section":  ("Courier New", 13, "bold"),
+            "btn_lg":   ("Courier New", 15, "bold"),
+            "btn_md":   ("Courier New", 13, "bold"),
+            "btn_sm":   ("Courier New", 11, "bold"),
+        },
+        "btn_primary_border":   2,
+        "btn_secondary_border": 2,
+        "btn_start_hover":      "#C800DD",
+        "icon_hover":           "#280038",
+    },
+}
+
+
+def load_theme_config() -> str:
+    """Returns the saved theme name, defaulting to 'Cyber-Owl'."""
+    try:
+        if os.path.exists(LOCAL_SETTINGS_FILE):
+            with open(LOCAL_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f).get("theme", "Cyber-Owl")
+                return saved if saved in THEMES else "Cyber-Owl"
+    except Exception:
+        pass
+    return "Cyber-Owl"
+
+
+def save_theme_config(theme_name: str) -> None:
+    """Persists the chosen theme to local_settings.json (atomic write)."""
+    try:
+        data: dict = {}
+        if os.path.exists(LOCAL_SETTINGS_FILE):
+            try:
+                with open(LOCAL_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+        data["theme"] = theme_name
+        import tempfile as _tmp
+        fd, tmp_path = _tmp.mkstemp(dir=APPDATA_DIR, prefix="ls_", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+            os.replace(tmp_path, LOCAL_SETTINGS_FILE)
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+    except Exception as exc:
+        print(f"[Theme]: save error: {exc}")
 
 # Доступные модели по провайдерам
 ALL_PROVIDERS_MODELS = {
-    "Gemini": ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.0-pro"],
-    "OpenAI": ["gpt-5-mini", "gpt-5", "o3-mini"],
+    "Gemini":    ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.0-pro"],
+    "OpenAI":    ["gpt-5-mini", "gpt-5", "o3-mini"],
     "Anthropic": ["claude-4-haiku", "claude-4-sonnet", "claude-4-opus"],
-    "DeepSeek": ["deepseek-chat", "deepseek-reasoner"],
-    "Ollama": ["local-model"],
-    "LM Studio": ["local-model"]
+    "DeepSeek":  ["deepseek-chat", "deepseek-reasoner"],
+    "Ollama":    ["local-model"],
+    "LM Studio": ["local-model"],
 }
-
-# Провайдеры, работающие через локальный сервер (без облачного API-ключа).
 LOCAL_PROVIDERS = ("Ollama", "LM Studio")
-# Список всех провайдеров для выпадающего меню (порядок сохраняется).
-PROVIDER_ORDER = ["Gemini", "OpenAI", "Anthropic", "DeepSeek", "Ollama", "LM Studio"]
+PROVIDER_ORDER  = ["Gemini", "OpenAI", "Anthropic", "DeepSeek", "Ollama", "LM Studio"]
+
+# Optional tray support
+try:
+    import pystray as _pystray
+    _TRAY_AVAILABLE = True
+except ImportError:
+    _TRAY_AVAILABLE = False
 
 # =====================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ИНТЕРФЕЙСА
 # =====================================================================
 def force_dark_title_bar(window):
-    """Принудительно перекрашивает заголовок окна Windows в темный цвет"""
+    """Принудительно перекрашивает заголовок окна Windows в тёмный цвет."""
     try:
         import ctypes
         window.update_idletasks()
         hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
-        if hwnd == 0: hwnd = window.winfo_id()
+        if hwnd == 0:
+            hwnd = window.winfo_id()
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(ctypes.c_int(1)), 4)
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(ctypes.c_int(1)), 4)
     except Exception:
@@ -86,7 +210,7 @@ def force_dark_title_bar(window):
 
 
 def _apply_icon_win32(window):
-    """Set window icon via both Tkinter and Win32 API — belt-and-suspenders for CTkToplevel."""
+    """Sets window icon via Tkinter + Win32 API for reliable CTkToplevel support."""
     if not os.path.exists(ICON_PATH):
         return
     try:
@@ -95,7 +219,6 @@ def _apply_icon_win32(window):
         pass
     try:
         import ctypes
-        # GA_ROOT(2) надёжно находит корневое окно даже для вложенных CTkToplevel
         GA_ROOT = 2
         hwnd = ctypes.windll.user32.GetAncestor(window.winfo_id(), GA_ROOT)
         if not hwnd:
@@ -114,23 +237,15 @@ def _apply_icon_win32(window):
     except Exception:
         pass
 
-def center_window(window, width, height, parent=None):
-    """
-    Центрирует окно без мерцания (alpha=0 → geometry → alpha=1).
 
-    Координатная модель CustomTkinter + DPI-aware Windows:
-      • winfo_rootx / winfo_width / winfo_screenwidth — физические пиксели.
-      • geometry("WxH+X+Y"): CTk умножает W и H на sc внутри себя,
-        но X и Y передаёт ОС как есть — они должны быть физическими пикселями.
-      Формула: переводим логические w/h в физические (× sc), считаем X/Y
-      в физических пикселях, передаём в geometry().
-    """
+def center_window(window, width, height, parent=None):
+    """Centres a window without flicker: alpha=0 → geometry → alpha=1."""
     try:
         window.attributes("-alpha", 0.0)
     except Exception:
         pass
 
-    def _apply_centered_position():
+    def _apply():
         if not window.winfo_exists():
             return
         try:
@@ -139,29 +254,22 @@ def center_window(window, width, height, parent=None):
                 sc = window._get_window_scaling()
             except Exception:
                 sc = 1.0
-
-            # Логические размеры окна → физические пиксели для арифметики центрирования
-            child_phys_w = width * sc
-            child_phys_h = height * sc
-
+            pw_phys = width  * sc
+            ph_phys = height * sc
             if parent and parent.winfo_exists():
-                # winfo_* возвращают физические пиксели
                 px = parent.winfo_rootx()
                 py = parent.winfo_rooty()
                 pw = parent.winfo_width()
                 ph = parent.winfo_height()
-                x = int(px + (pw - child_phys_w) / 2)
-                y = int(py + (ph - child_phys_h) / 2)
+                x = int(px + (pw - pw_phys) / 2)
+                y = int(py + (ph - ph_phys) / 2)
             else:
                 sw = window.winfo_screenwidth()
                 sh = window.winfo_screenheight()
-                x = int((sw - child_phys_w) / 2)
-                y = int((sh - child_phys_h) / 2)
-
-            # width/height — логические (CTk умножит на sc); x/y — физические (CTk не трогает)
-            window.geometry(f"{width}x{height}+{max(0, x)}+{max(0, y)}")
-        except Exception as e:
-            print(f"[Резервное центрирование]: {e}")
+                x = int((sw - pw_phys) / 2)
+                y = int((sh - ph_phys) / 2)
+            window.geometry(f"{width}x{height}+{max(0,x)}+{max(0,y)}")
+        except Exception:
             window.geometry(f"{width}x{height}")
         finally:
             try:
@@ -170,20 +278,21 @@ def center_window(window, width, height, parent=None):
             except Exception:
                 pass
 
-    window.after(15, _apply_centered_position)
+    window.after(15, _apply)
+
 
 def bind_russian_hotkeys(widget):
-    """Обработка горячих клавиш Ctrl+C, Ctrl+V, Ctrl+A, Ctrl+X для русской раскладки."""
+    """Ctrl+C/V/A/X support for Russian keyboard layouts."""
     target = widget
     if hasattr(widget, "_entry"):
         target = widget._entry
     elif hasattr(widget, "_textbox"):
         target = widget._textbox
 
-    def handle_control_keys(event):
-        key = event.keysym.lower()
+    def _handle(event):
+        key     = event.keysym.lower()
         keycode = event.keycode
-        
+
         if keycode == 86 or key in ('v', 'cyrillic_em'):
             try:
                 text = event.widget.clipboard_get()
@@ -200,24 +309,24 @@ def bind_russian_hotkeys(widget):
             except Exception:
                 pass
             return "break"
-            
+
         elif keycode == 67 or key in ('c', 'cyrillic_es'):
             try:
-                selected_text = None
+                sel = None
                 try:
-                    selected_text = event.widget.get("sel.first", "sel.last")
+                    sel = event.widget.get("sel.first", "sel.last")
                 except Exception:
                     try:
-                        selected_text = event.widget.selection_get()
+                        sel = event.widget.selection_get()
                     except Exception:
                         pass
-                if selected_text:
+                if sel:
                     event.widget.clipboard_clear()
-                    event.widget.clipboard_append(selected_text)
+                    event.widget.clipboard_append(sel)
             except Exception:
                 pass
             return "break"
-            
+
         elif keycode == 65 or key in ('a', 'cyrillic_ef'):
             try:
                 if hasattr(event.widget, "tag_add"):
@@ -229,22 +338,22 @@ def bind_russian_hotkeys(widget):
             except Exception:
                 pass
             return "break"
-            
+
         elif keycode == 88 or key in ('x', 'cyrillic_che'):
             try:
-                selected_text = None
+                sel = None
                 try:
-                    selected_text = event.widget.get("sel.first", "sel.last")
-                    if selected_text:
+                    sel = event.widget.get("sel.first", "sel.last")
+                    if sel:
                         event.widget.clipboard_clear()
-                        event.widget.clipboard_append(selected_text)
+                        event.widget.clipboard_append(sel)
                         event.widget.delete("sel.first", "sel.last")
                 except Exception:
                     try:
-                        selected_text = event.widget.selection_get()
-                        if selected_text:
+                        sel = event.widget.selection_get()
+                        if sel:
                             event.widget.clipboard_clear()
-                            event.widget.clipboard_append(selected_text)
+                            event.widget.clipboard_append(sel)
                             event.widget.delete("sel.first", "sel.last")
                     except Exception:
                         pass
@@ -253,31 +362,10 @@ def bind_russian_hotkeys(widget):
             return "break"
 
     try:
-        target.bind("<Control-KeyPress>", handle_control_keys)
+        target.bind("<Control-KeyPress>", _handle)
     except Exception as e:
-        print(f"[Ошибка привязки клавиш]: {e}")
+        print(f"[Hotkeys]: bind error: {e}")
 
-# =====================================================================
-# FLASK СЕРВЕР (ПРИЕМ ДАННЫХ ИЗ РАСШИРЕНИЯ)
-# =====================================================================
-flask_app = Flask(__name__)
-CORS(flask_app)
-app_instance = None
-
-@flask_app.route('/webhook', methods=['POST'])
-def webhook():
-    global app_instance
-    if not app_instance or not app_instance.is_active:
-        return jsonify({"status": "ignored", "reason": "Assistant is offline"}), 200
-        
-    try:
-        data = request.json
-        if not data:
-            return jsonify({"status": "error", "reason": "No data received"}), 400
-        app_instance.enqueue_vacancy(data)
-        return jsonify({"status": "received", "queue_position": app_instance.vacancy_queue.qsize()}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "reason": str(e)}), 500
 
 # =====================================================================
 # ГЛАВНЫЙ ИНТЕРФЕЙС ПРИЛОЖЕНИЯ
@@ -285,51 +373,66 @@ def webhook():
 class JobHunterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        
-        global app_instance
-        app_instance = self
-        
-        self.is_active = False
-        self.server_started = False
-        self._paused_mode = False    # True when stopped with items still in queue
-        self._btn_resume = None
-        self._btn_reset = None
-        self._worker_has_item = False  # True while worker holds a dequeued item
-        self._batch_id = 0             # incremented on each new enqueue; debounces done-notification
-        self._local_server_ok = False   # Tracks local server reachability; True for cloud providers
-        self._server_poll_after_id = None  # after() handle for the server poll loop
-        # Session counters (reset on each START)
-        self._session_processed = 0
-        self._session_approved = 0
-        self._session_rejected = 0
-        # Дескрипторы werkzeug-сервера для корректного graceful-shutdown
-        # и предотвращения утечки/дублирования потоков Flask.
-        self.flask_server = None      # werkzeug.serving.BaseWSGIServer
-        self.flask_thread = None      # поток, в котором крутится serve_forever
-        # Set by run_flask_server() after make_server() binds the socket.
-        # _activate_when_ready() polls this — no blocking I/O on the main thread.
-        self._flask_ready = threading.Event()
 
-        # Потокобезопасная очередь для вакансий
-        self.vacancy_queue = queue.Queue()
-        self.worker_thread = None
+        self.is_active      = False
+        self._paused_mode   = False
+        self._btn_resume    = None
+        self._btn_reset     = None
+        self._worker_has_item       = False
+        self._batch_id              = 0
+        self._local_server_ok       = False
+        self._server_poll_after_id  = None
+        self._session_processed     = 0
+        self._session_approved      = 0
+        self._session_rejected      = 0
+        self._tray_icon             = None
+
+        # Потокобезопасная очередь вакансий
+        self.vacancy_queue     = queue.Queue()
+        self.worker_thread     = None
         self.stop_worker_event = threading.Event()
-        
+
+        # Lifecycle flag: set while the Tkinter main loop is alive.
+        # Background threads check this instead of calling winfo_exists() —
+        # winfo_exists() is a Tkinter call that must only run on the main thread.
+        self._alive = threading.Event()
+        self._alive.set()
+
         # Загружаем конфигурацию и применяем язык интерфейса
         self.app_config = jh_storage_manager.load_config()
         jh_i18n.set_language(self.app_config.get("language", "en"))
 
-        self.title(jh_version.get_window_title() + " Global")
+        # Load saved theme and update global color palette before any widget is created
+        self._active_theme = load_theme_config()
+        self._tw = {}
+        _t = THEMES[self._active_theme]
+        global COLOR_BG_DARK, COLOR_CARD_BG, COLOR_INPUT_BG
+        global COLOR_CYAN_NEON, COLOR_CYAN_HOVER, COLOR_GOLD, COLOR_GOLD_HOVER
+        global COLOR_RED, COLOR_RED_HOVER, COLOR_TEXT_MUTED, COLOR_TEXT_LIGHT
+        COLOR_BG_DARK    = _t["bg"];      COLOR_CARD_BG    = _t["card_bg"]
+        COLOR_INPUT_BG   = _t["input_bg"]
+        COLOR_CYAN_NEON  = _t["accent"];  COLOR_CYAN_HOVER = _t["accent_hover"]
+        COLOR_GOLD       = _t["gold"];    COLOR_GOLD_HOVER = _t["gold_hover"]
+        COLOR_RED        = _t["danger"];  COLOR_RED_HOVER  = _t["danger_hover"]
+        COLOR_TEXT_MUTED = _t["text_muted"]; COLOR_TEXT_LIGHT = _t["text"]
+
+        try:
+            import jh_notifications
+            jh_notifications.apply_theme(_t)
+        except Exception:
+            pass
+
+        self.title(jh_version.get_window_title())
         self.resizable(False, False)
         self.configure(fg_color=COLOR_BG_DARK)
         ctk.set_appearance_mode("dark")
-        
-        center_window(self, 680, 770)
+
+        center_window(self, 680, 790)
         force_dark_title_bar(self)
-        
-        # Протокол чистого закрытия приложения (высвобождает сокеты Flask)
+
+        # WM_DELETE_WINDOW → скрываем в трей вместо завершения
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
+
         try:
             if os.path.exists(ICON_PATH):
                 self.iconbitmap(ICON_PATH)
@@ -339,332 +442,411 @@ class JobHunterApp(ctk.CTk):
         self.setup_ui()
         self.load_config_to_ui()
 
-    def on_closing(self):
-        """Безопасное и чистое закрытие приложения для предотвращения зомби-процессов и блокировок портов."""
+        # Запускаем движок захвата (глобальная горячая клавиша всегда активна;
+        # данные принимаются только когда is_active == True).
+        self._init_automation()
+
+    # ── Automation ────────────────────────────────────────────────────────────
+
+    def _init_automation(self) -> None:
+        """Creates and starts the BrowserCaptureEngine in a daemon thread."""
+        try:
+            from jh_automation import BrowserCaptureEngine, HotkeySpec
+            spec = HotkeySpec.from_config(self.app_config)
+            self._automation = BrowserCaptureEngine(
+                vacancy_queue=self.vacancy_queue,
+                app_ready_fn=lambda: self.is_active,
+                hotkey_spec=spec,
+                notify_fn=self._make_hotkey_notify_fn(),
+                capture_success_fn=self._make_capture_success_fn(),
+            )
+            self._automation.start()
+        except Exception as exc:
+            print(f"[Automation]: Failed to initialise: {exc}")
+            self._automation = None
+
+    def _make_hotkey_notify_fn(self):
+        """
+        Returns a callable safe to invoke from the capture daemon thread.
+        Updates the status bar via after() — no preemptive toast is shown here;
+        the success toast fires only after verified content lands in the queue
+        (see _make_capture_success_fn).
+        """
+        def _notify():
+            # _ui_update runs on the main thread via after() — winfo_exists() is
+            # safe there.  The outer guard uses _alive (no Tkinter call) because
+            # _notify() itself is invoked from the automation daemon thread.
+            def _ui_update():
+                if not self._alive.is_set():
+                    return
+                if not self.is_active:
+                    return
+                self.update_status(tr("status_capturing"), COLOR_GOLD)
+            if self._alive.is_set():
+                try:
+                    self.after(0, _ui_update)
+                except Exception:
+                    pass
+        return _notify
+
+    def _make_capture_success_fn(self):
+        """
+        Returns a callable invoked by BrowserCaptureEngine after a vacancy
+        payload has been verified and placed in the queue.  Fires a toast
+        only at that point — after the capture is confirmed successful.
+        Dispatched to the Tkinter thread via after() for thread safety.
+        """
+        def _on_success():
+            def _ui():
+                if not self._alive.is_set():
+                    return
+                if not self.app_config.get("notifications_enabled", True):
+                    return
+                try:
+                    import jh_notifications
+                    jh_notifications.send_notification(
+                        "Job Hunter AI",
+                        tr("notif_capture_success"),
+                        root=self,
+                        on_click=self._bring_to_front,
+                    )
+                except Exception:
+                    pass
+            if self._alive.is_set():
+                try:
+                    self.after(0, _ui)
+                except Exception:
+                    pass
+        return _on_success
+
+    # ── System tray ───────────────────────────────────────────────────────────
+
+    def on_closing(self) -> None:
+        """Hide the window to the system tray instead of terminating."""
+        self.withdraw()
+        self._start_tray_icon()
+
+    def _start_tray_icon(self) -> None:
+        """Creates a pystray icon and runs it in a daemon thread."""
+        if not _TRAY_AVAILABLE:
+            # No pystray — fall through to real exit
+            self._do_exit()
+            return
+
+        # Stop any previous tray icon
+        if self._tray_icon is not None:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+            self._tray_icon = None
+
+        def _on_open(icon, _item):
+            icon.stop()
+            self._tray_icon = None
+            try:
+                self.after(0, self._restore_from_tray)
+            except Exception:
+                pass
+
+        def _on_exit(icon, _item):
+            icon.stop()
+            self._tray_icon = None
+            try:
+                self.after(0, self._do_exit)
+            except Exception:
+                self._do_exit()
+
+        menu = _pystray.Menu(
+            _pystray.MenuItem(tr("tray_open"), _on_open, default=True),
+            _pystray.MenuItem(tr("tray_exit"), _on_exit),
+        )
+
+        # Load icon image for tray
+        tray_img = None
+        for path in (ICON_PATH, LOGO_PNG_PATH):
+            if os.path.exists(path):
+                try:
+                    tray_img = Image.open(path).convert("RGBA")
+                    tray_img = tray_img.resize((64, 64), Image.Resampling.LANCZOS)
+                    break
+                except Exception:
+                    pass
+        if tray_img is None:
+            tray_img = Image.new("RGBA", (64, 64), (0, 216, 198, 255))
+
+        icon = _pystray.Icon("JobHunterAI", tray_img, "Job Hunter AI", menu)
+        self._tray_icon = icon
+
+        t = threading.Thread(target=icon.run, daemon=True, name="TrayThread")
+        t.start()
+
+    def _restore_from_tray(self) -> None:
+        """Restores the main window from the system tray."""
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+            force_dark_title_bar(self)
+        except Exception:
+            pass
+
+    def _bring_to_front(self) -> None:
+        """Brings the main window to the foreground; restores from tray if hidden."""
+        icon, self._tray_icon = self._tray_icon, None
+        if icon is not None:
+            # Mirror _on_open: stop the icon fully first, then schedule restore.
+            # Calling deiconify() while the tray icon's Win32 message loop is still
+            # running prevents the window from reliably receiving foreground focus.
+            def _stop_then_restore():
+                icon.stop()
+                if self._alive.is_set():
+                    try:
+                        self.after(0, self._restore_from_tray)
+                    except Exception:
+                        pass
+            threading.Thread(target=_stop_then_restore, daemon=True, name="TrayStop").start()
+        else:
+            self._restore_from_tray()
+
+    def _do_exit(self) -> None:
+        """Performs a clean, unconditional application exit."""
         self.is_active = False
         self.stop_worker_event.set()
+        self._alive.clear()  # signal all background threads to stop posting UI updates
+
         if self._server_poll_after_id is not None:
             try:
                 self.after_cancel(self._server_poll_after_id)
             except Exception:
                 pass
 
-        # Корректно гасим werkzeug-сервер: разблокируем serve_forever, закрываем
-        # слушающий сокет и дожидаемся завершения потока. Это устраняет утечку
-        # потока/сокета Flask при закрытии главного окна.
-        try:
-            self.shutdown_flask_server()
-        except Exception as e:
-            print(f"[Закрытие]: Ошибка остановки Flask: {e}")
+        automation = getattr(self, "_automation", None)
+        if automation is not None:
+            try:
+                automation.stop()
+            except Exception:
+                pass
 
-        # Даём worker-потоку шанс выйти из текущей итерации.
         worker = getattr(self, "worker_thread", None)
         if worker is not None and worker.is_alive():
             worker.join(timeout=1.0)
 
-        try:
-            time.sleep(0.1)
-        except Exception:
-            pass
         os._exit(0)
 
+    # ── Logo ──────────────────────────────────────────────────────────────────
+
     def load_and_resize_logo(self, height_pixels):
-        """Загружает логотип и масштабирует его под DPI экрана."""
+        """Loads and DPI-scales the logo for the given logical height."""
         try:
             try:
                 scaling = self._get_window_scaling()
             except Exception:
                 scaling = 1.0
-
-            target_height = int(height_pixels * scaling)
-            
+            target_h = int(height_pixels * scaling)
             logo_img = None
             if os.path.exists(LOGO_PNG_PATH):
                 logo_img = Image.open(LOGO_PNG_PATH)
             elif os.path.exists(ICON_PATH):
                 logo_img = Image.open(ICON_PATH)
-
             if logo_img:
-                aspect_ratio = logo_img.width / logo_img.height
-                target_width = int(target_height * aspect_ratio)
-                logo_img = logo_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-                
+                aspect      = logo_img.width / logo_img.height
+                target_w    = int(target_h * aspect)
+                logo_img    = logo_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
                 return ctk.CTkImage(
-                    light_image=logo_img,
-                    dark_image=logo_img,
-                    size=(int(target_width / scaling), int(target_height / scaling))
+                    light_image=logo_img, dark_image=logo_img,
+                    size=(int(target_w / scaling), int(target_h / scaling))
                 )
         except Exception as e:
-            print(f"[Ошибка загрузки логотипа]: {e}")
+            print(f"[Logo]: {e}")
         return None
 
+    # ── Main UI ───────────────────────────────────────────────────────────────
+
     def setup_ui(self):
-        """Создает элементы управления в главном окне."""
+        """Builds all widgets in the main window."""
+        self._tw = {
+            "label_title":    [], "label_muted":    [], "label_body":      [],
+            "frame_card":     [], "input":           [], "textbox":         [],
+            "btn_primary_sm": [], "btn_gold":        [],
+            "btn_accent_icon":[], "btn_gold_icon":   [], "btn_danger_icon": [],
+            "checkbox":       [],
+        }
+
         header_container = ctk.CTkFrame(self, fg_color="transparent")
         header_container.pack(pady=(20, 5))
-        
+
         logo_image = self.load_and_resize_logo(38)
         if logo_image:
-            logo_lbl = ctk.CTkLabel(header_container, image=logo_image, text="")
-            logo_lbl.pack(side="left", padx=(0, 12))
-            
-        title_lbl = ctk.CTkLabel(
-            header_container, 
-            text="JOB HUNTER AI", 
-            font=("Arial", 24, "bold"), 
-            text_color=COLOR_CYAN_NEON
+            ctk.CTkLabel(header_container, image=logo_image, text="").pack(side="left", padx=(0, 12))
+
+        self._title_lbl = ctk.CTkLabel(
+            header_container, text="JOB HUNTER AI",
+            font=("Arial", 24, "bold"), text_color=COLOR_CYAN_NEON
         )
-        title_lbl.pack(side="left")
-        
+        self._title_lbl.pack(side="left")
+        self._tw["label_title"].append(self._title_lbl)
+
         self._subtitle_lbl = ctk.CTkLabel(
-            self,
-            text=tr("subtitle"),
-            font=("Arial", 12),
-            text_color=COLOR_TEXT_MUTED
+            self, text=tr("subtitle"),
+            font=("Arial", 12), text_color=COLOR_TEXT_MUTED
         )
         self._subtitle_lbl.pack(pady=(0, 20))
+        self._tw["label_muted"].append(self._subtitle_lbl)
 
         name_frame = ctk.CTkFrame(self, fg_color="transparent")
         name_frame.pack(pady=10, padx=30, fill="x")
-        
+
         self.first_name_input = ctk.CTkEntry(
-            name_frame,
-            placeholder_text=tr("first_name_ph"),
-            height=45,
-            fg_color=COLOR_INPUT_BG,
-            border_color=COLOR_CARD_BG,
-            text_color=COLOR_TEXT_LIGHT,
-            placeholder_text_color=COLOR_TEXT_MUTED
+            name_frame, placeholder_text=tr("first_name_ph"), height=45,
+            fg_color=COLOR_INPUT_BG, border_color=COLOR_CARD_BG,
+            text_color=COLOR_TEXT_LIGHT, placeholder_text_color=COLOR_TEXT_MUTED
         )
         self.first_name_input.pack(side="left", fill="x", expand=True, padx=(0, 10))
         bind_russian_hotkeys(self.first_name_input)
 
         self.last_name_input = ctk.CTkEntry(
-            name_frame,
-            placeholder_text=tr("last_name_ph"),
-            height=45,
-            fg_color=COLOR_INPUT_BG,
-            border_color=COLOR_CARD_BG,
-            text_color=COLOR_TEXT_LIGHT,
-            placeholder_text_color=COLOR_TEXT_MUTED
+            name_frame, placeholder_text=tr("last_name_ph"), height=45,
+            fg_color=COLOR_INPUT_BG, border_color=COLOR_CARD_BG,
+            text_color=COLOR_TEXT_LIGHT, placeholder_text_color=COLOR_TEXT_MUTED
         )
         self.last_name_input.pack(side="right", fill="x", expand=True, padx=(10, 0))
         bind_russian_hotkeys(self.last_name_input)
+        self._tw["input"].extend([self.first_name_input, self.last_name_input])
 
         resume_header_frame = ctk.CTkFrame(self, fg_color="transparent")
         resume_header_frame.pack(anchor="w", padx=30, pady=(15, 5), fill="x")
-        
+
         self._resume_lbl = ctk.CTkLabel(
-            resume_header_frame,
-            text=tr("resume_label"),
-            font=("Arial", 13, "bold"),
-            text_color=COLOR_TEXT_LIGHT
+            resume_header_frame, text=tr("resume_label"),
+            font=("Arial", 13, "bold"), text_color=COLOR_TEXT_LIGHT
         )
         self._resume_lbl.pack(side="left")
-        
+        self._tw["label_body"].append(self._resume_lbl)
+
         def paste_to_resume():
             try:
-                clipboard_text = self.clipboard_get()
                 self.resume_input.delete("0.0", "end")
-                self.resume_input.insert("0.0", clipboard_text.strip())
+                self.resume_input.insert("0.0", self.clipboard_get().strip())
             except Exception:
                 pass
 
-        # Icon-only compact buttons, packed right-to-left:
-        # ⚙ (rightmost) → 📋 → 📂 (furthest from right edge)
         self.btn_ai_settings = ctk.CTkButton(
-            resume_header_frame,
-            text="⚙",
-            width=30,
-            height=30,
-            font=("Arial", 14),
-            fg_color=COLOR_CARD_BG,
-            hover_color=COLOR_INPUT_BG,
-            text_color=COLOR_CYAN_NEON,
-            border_width=1,
-            border_color=COLOR_CYAN_NEON,
+            resume_header_frame, text="⚙", width=30, height=30,
+            font=("Arial", 14), fg_color=COLOR_CARD_BG, hover_color=COLOR_INPUT_BG,
+            text_color=COLOR_CYAN_NEON, border_width=1, border_color=COLOR_CYAN_NEON,
             command=self.open_ai_settings_window
         )
         self.btn_ai_settings.pack(side="right")
+        self._tw["btn_accent_icon"].append(self.btn_ai_settings)
 
         self.btn_history = ctk.CTkButton(
-            resume_header_frame,
-            text="📂",
-            width=30,
-            height=30,
-            font=("Arial", 14),
-            fg_color=COLOR_CARD_BG,
-            hover_color=COLOR_INPUT_BG,
-            text_color=COLOR_GOLD,
-            border_width=1,
-            border_color=COLOR_GOLD,
+            resume_header_frame, text="📂", width=30, height=30,
+            font=("Arial", 14), fg_color=COLOR_CARD_BG, hover_color=COLOR_INPUT_BG,
+            text_color=COLOR_GOLD, border_width=1, border_color=COLOR_GOLD,
             command=self.open_resume_history
         )
         self.btn_history.pack(side="right", padx=(0, 4))
+        self._tw["btn_gold_icon"].append(self.btn_history)
 
         self.btn_paste_resume = ctk.CTkButton(
-            resume_header_frame,
-            text="📋",
-            width=30,
-            height=30,
-            font=("Arial", 14),
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            text_color=COLOR_BG_DARK,
+            resume_header_frame, text="📋", width=30, height=30,
+            font=("Arial", 14), fg_color=COLOR_CARD_BG, hover_color=COLOR_CARD_BG,
+            text_color=COLOR_CYAN_NEON, border_width=1, border_color=COLOR_CYAN_NEON,
             command=paste_to_resume
         )
         self.btn_paste_resume.pack(side="right", padx=(0, 4))
+        self._tw["btn_accent_icon"].append(self.btn_paste_resume)
 
         self.btn_pdf_import = ctk.CTkButton(
-            resume_header_frame,
-            text=tr("btn_pdf_import"),
-            width=38,
-            height=30,
-            font=("Arial", 11, "bold"),
-            fg_color=COLOR_CARD_BG,
-            hover_color=COLOR_INPUT_BG,
-            text_color=COLOR_RED,
-            border_width=1,
-            border_color=COLOR_RED,
+            resume_header_frame, text=tr("btn_pdf_import"),
+            width=38, height=30, font=("Arial", 11, "bold"),
+            fg_color=COLOR_CARD_BG, hover_color=COLOR_INPUT_BG,
+            text_color=COLOR_RED, border_width=1, border_color=COLOR_RED,
             command=self.import_resume_from_pdf
         )
         self.btn_pdf_import.pack(side="right", padx=(0, 4))
-        
+        self._tw["btn_danger_icon"].append(self.btn_pdf_import)
+
         self.resume_input = ctk.CTkTextbox(
-            self, 
-            height=180, 
-            fg_color=COLOR_INPUT_BG,
-            border_color=COLOR_CARD_BG,
-            border_width=1,
-            text_color=COLOR_TEXT_LIGHT
+            self, height=180, fg_color=COLOR_INPUT_BG, border_color=COLOR_CARD_BG,
+            border_width=1, text_color=COLOR_TEXT_LIGHT
         )
         self.resume_input.pack(pady=5, padx=30, fill="x")
         bind_russian_hotkeys(self.resume_input)
+        self._tw["textbox"].append(self.resume_input)
 
         self._filter_lbl = ctk.CTkLabel(
-            self,
-            text=tr("filter_label"),
-            font=("Arial", 13, "bold"),
-            text_color=COLOR_TEXT_LIGHT
+            self, text=tr("filter_label"),
+            font=("Arial", 13, "bold"), text_color=COLOR_TEXT_LIGHT
         )
         self._filter_lbl.pack(anchor="w", padx=30, pady=(15, 5))
-        
-        # Контейнер для фильтров
-        filter_frame = ctk.CTkFrame(self, fg_color=COLOR_CARD_BG, corner_radius=8)
-        filter_frame.pack(pady=5, padx=30, fill="x")
-        
-        # КОРРЕКТНЫЕ И СТАБИЛЬНЫЕ НАСТРОЙКИ ЧЕКБОКСОВ (Размер 20х20 исключает оверлап текстуры)
-        self.cb_remote = ctk.CTkCheckBox(
-            filter_frame,
-            text=tr("cb_remote"),
-            text_color=COLOR_TEXT_LIGHT,
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            border_color=COLOR_TEXT_MUTED,
-            checkbox_width=20,
-            checkbox_height=20,
-            border_width=2,
+        self._tw["label_body"].append(self._filter_lbl)
+
+        self._filter_frame = ctk.CTkFrame(self, fg_color=COLOR_CARD_BG, corner_radius=8)
+        self._filter_frame.pack(pady=5, padx=30, fill="x")
+        self._tw["frame_card"].append(self._filter_frame)
+
+        cb_kwargs = dict(
+            text_color=COLOR_TEXT_LIGHT, fg_color=COLOR_CYAN_NEON,
+            hover_color=COLOR_CYAN_HOVER, border_color=COLOR_TEXT_MUTED,
+            checkbox_width=20, checkbox_height=20, border_width=2,
             checkmark_color=COLOR_TEXT_LIGHT
         )
+
+        self.cb_remote = ctk.CTkCheckBox(self._filter_frame, text=tr("cb_remote"), **cb_kwargs)
         self.cb_remote.pack(side="left", padx=15, pady=12)
         self.cb_remote.select()
 
-        self.cb_office = ctk.CTkCheckBox(
-            filter_frame,
-            text=tr("cb_office"),
-            text_color=COLOR_TEXT_LIGHT,
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            border_color=COLOR_TEXT_MUTED,
-            checkbox_width=20,
-            checkbox_height=20,
-            border_width=2,
-            checkmark_color=COLOR_TEXT_LIGHT
-        )
+        self.cb_office = ctk.CTkCheckBox(self._filter_frame, text=tr("cb_office"), **cb_kwargs)
         self.cb_office.pack(side="left", padx=15, pady=12)
 
-        self.cb_hybrid = ctk.CTkCheckBox(
-            filter_frame,
-            text=tr("cb_hybrid"),
-            text_color=COLOR_TEXT_LIGHT,
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            border_color=COLOR_TEXT_MUTED,
-            checkbox_width=20,
-            checkbox_height=20,
-            border_width=2,
-            checkmark_color=COLOR_TEXT_LIGHT
-        )
+        self.cb_hybrid = ctk.CTkCheckBox(self._filter_frame, text=tr("cb_hybrid"), **cb_kwargs)
         self.cb_hybrid.pack(side="left", padx=15, pady=12)
 
-        # Location filter: checkbox + country entry
-        loc_frame = ctk.CTkFrame(filter_frame, fg_color="transparent")
+        loc_frame = ctk.CTkFrame(self._filter_frame, fg_color="transparent")
         loc_frame.pack(side="right", padx=(0, 10), pady=8)
 
-        self.cb_location = ctk.CTkCheckBox(
-            loc_frame,
-            text=tr("cb_location"),
-            text_color=COLOR_TEXT_LIGHT,
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            border_color=COLOR_TEXT_MUTED,
-            checkbox_width=20,
-            checkbox_height=20,
-            border_width=2,
-            checkmark_color=COLOR_TEXT_LIGHT
-        )
+        self.cb_location = ctk.CTkCheckBox(loc_frame, text=tr("cb_location"), **cb_kwargs)
         self.cb_location.pack(side="left")
         self.cb_location.select()
 
         self.location_entry = ctk.CTkEntry(
-            loc_frame,
-            placeholder_text=tr("location_placeholder"),
-            width=130,
-            height=30,
-            fg_color=COLOR_INPUT_BG,
-            border_color=COLOR_CARD_BG,
-            text_color=COLOR_TEXT_LIGHT,
-            placeholder_text_color=COLOR_TEXT_MUTED,
+            loc_frame, placeholder_text=tr("location_placeholder"),
+            width=130, height=30, fg_color=COLOR_INPUT_BG, border_color=COLOR_CARD_BG,
+            text_color=COLOR_TEXT_LIGHT, placeholder_text_color=COLOR_TEXT_MUTED,
             font=("Arial", 11)
         )
         self.location_entry.pack(side="left", padx=(8, 0))
+        self._tw["checkbox"].extend([self.cb_remote, self.cb_office, self.cb_hybrid, self.cb_location])
+        self._tw["input"].append(self.location_entry)
 
-        # Важнейший фикс: сброс фокуса при клике на чекбоксы для предотвращения залипания подсветки
-        def reset_widget_focus(event):
+        def _reset_focus(event):
             self.focus()
 
-        self.cb_remote.bind("<ButtonRelease-1>", reset_widget_focus)
-        self.cb_office.bind("<ButtonRelease-1>", reset_widget_focus)
-        self.cb_hybrid.bind("<ButtonRelease-1>", reset_widget_focus)
-        self.cb_location.bind("<ButtonRelease-1>", reset_widget_focus)
+        for cb in (self.cb_remote, self.cb_office, self.cb_hybrid, self.cb_location):
+            cb.bind("<ButtonRelease-1>", _reset_focus)
 
         self.status_lbl = ctk.CTkLabel(
-            self,
-            text=tr("status_loaded"),
-            font=("Arial", 12, "bold"),
-            text_color=COLOR_CYAN_NEON,
-            wraplength=600
+            self, text=tr("status_loaded"), font=("Arial", 12, "bold"),
+            text_color=COLOR_CYAN_NEON, wraplength=600
         )
         self.status_lbl.pack(pady=10)
 
         self._toggle_frame = ctk.CTkFrame(self, fg_color="transparent")
         self._toggle_frame.pack(pady=5, padx=30, fill="x")
         self._show_normal_toggle()
-        
+
         self._btn_results = ctk.CTkButton(
-            self,
-            text=tr("btn_results"),
-            font=("Arial", 13, "bold"),
-            fg_color=COLOR_GOLD,
-            hover_color=COLOR_GOLD_HOVER,
-            text_color=COLOR_BG_DARK,
-            height=45,
-            command=self.open_results
+            self, text=tr("btn_results"),
+            font=("Arial", 13, "bold"), fg_color=COLOR_GOLD, hover_color=COLOR_GOLD_HOVER,
+            text_color=COLOR_BG_DARK, height=45, command=self.open_results
         )
         self._btn_results.pack(pady=(5, 20), padx=30, fill="x")
+        self._tw["btn_gold"].append(self._btn_results)
 
     def retranslate_main_ui(self):
-        """Обновляет все локализуемые строки главного окна при смене языка."""
+        """Updates all localisable strings after a language switch."""
         try:
             self._subtitle_lbl.configure(text=tr("subtitle"))
             self._resume_lbl.configure(text=tr("resume_label"))
@@ -675,7 +857,9 @@ class JobHunterApp(ctk.CTk):
             self.cb_location.configure(text=tr("cb_location"))
             self.location_entry.configure(placeholder_text=tr("location_placeholder"))
             self._btn_results.configure(text=tr("btn_results"))
-            # Toggle area: three states — running / paused-with-queue / stopped
+            self.first_name_input.configure(placeholder_text=tr("first_name_ph"))
+            self.last_name_input.configure(placeholder_text=tr("last_name_ph"))
+
             if self.is_active:
                 try:
                     self.btn_toggle.configure(text=tr("btn_stop"))
@@ -692,60 +876,52 @@ class JobHunterApp(ctk.CTk):
                     self.btn_toggle.configure(text=tr("btn_start"))
                 except Exception:
                     pass
-            # Placeholders для полей ввода
-            self.first_name_input.configure(placeholder_text=tr("first_name_ph"))
-            self.last_name_input.configure(placeholder_text=tr("last_name_ph"))
         except Exception as e:
             print(f"[i18n]: retranslate_main_ui error: {e}")
 
     def _show_normal_toggle(self):
-        """Renders a single START button inside the toggle frame."""
         for w in self._toggle_frame.winfo_children():
             w.destroy()
+        _t   = THEMES.get(getattr(self, "_active_theme", "Cyber-Owl"), THEMES["Cyber-Owl"])
+        _pbw = _t["btn_primary_border"]
         self.btn_toggle = ctk.CTkButton(
-            self._toggle_frame,
-            text=tr("btn_start"),
-            font=("Arial", 15, "bold"),
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            text_color=COLOR_BG_DARK,
-            height=50,
+            self._toggle_frame, text=tr("btn_start"),
+            font=_t["fonts"]["btn_lg"], fg_color=COLOR_CYAN_NEON,
+            hover_color=_t.get("btn_start_hover", COLOR_CYAN_HOVER), text_color=COLOR_BG_DARK,
+            height=50, corner_radius=_t["corner_radius"],
+            border_width=_pbw,
+            border_color=COLOR_CYAN_NEON if _pbw else COLOR_CARD_BG,
             command=self.toggle_assistant
         )
         self.btn_toggle.pack(fill="x")
 
     def _show_paused_toggle(self, q_size=0):
-        """Renders Resume (80%) + Reset Queue (20%) buttons inside the toggle frame."""
         self._paused_mode = True
         for w in self._toggle_frame.winfo_children():
             w.destroy()
         self._toggle_frame.columnconfigure(0, weight=4)
         self._toggle_frame.columnconfigure(1, weight=1)
+        _t   = THEMES.get(getattr(self, "_active_theme", "Cyber-Owl"), THEMES["Cyber-Owl"])
+        _pbw = _t["btn_primary_border"]
+        _cr  = _t["corner_radius"]
         self._btn_resume = ctk.CTkButton(
-            self._toggle_frame,
-            text=tr("btn_resume"),
-            font=("Arial", 15, "bold"),
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            text_color=COLOR_BG_DARK,
-            height=50,
+            self._toggle_frame, text=tr("btn_resume"),
+            font=_t["fonts"]["btn_lg"], fg_color=COLOR_CYAN_NEON,
+            hover_color=_t.get("btn_start_hover", COLOR_CYAN_HOVER), text_color=COLOR_BG_DARK,
+            height=50, corner_radius=_cr, border_width=_pbw,
+            border_color=COLOR_CYAN_NEON if _pbw else COLOR_CARD_BG,
             command=self.toggle_assistant
         )
         self._btn_resume.grid(row=0, column=0, sticky="ew", padx=(0, 4))
         self._btn_reset = ctk.CTkButton(
-            self._toggle_frame,
-            text=tr("btn_reset_queue"),
-            font=("Arial", 13, "bold"),
-            fg_color=COLOR_RED,
-            hover_color=COLOR_RED_HOVER,
-            text_color=COLOR_TEXT_LIGHT,
-            height=50,
+            self._toggle_frame, text=tr("btn_reset_queue"),
+            font=_t["fonts"]["btn_md"], fg_color=COLOR_RED, hover_color=COLOR_RED_HOVER,
+            text_color=COLOR_TEXT_LIGHT, height=50, corner_radius=_cr,
             command=self._reset_queue
         )
         self._btn_reset.grid(row=0, column=1, sticky="ew", padx=(4, 0))
 
     def _reset_queue(self):
-        """Drains the paused queue and returns to the normal START button."""
         while not self.vacancy_queue.empty():
             try:
                 self.vacancy_queue.get_nowait()
@@ -755,13 +931,155 @@ class JobHunterApp(ctk.CTk):
         self._show_normal_toggle()
         self.status_lbl.configure(text=tr("status_stopped"), text_color=COLOR_RED)
 
+    # ── Theme ─────────────────────────────────────────────────────────────────
+
+    def apply_theme(self, theme_name: str) -> None:
+        """Switch the active theme and immediately repaint all registered widgets."""
+        global COLOR_BG_DARK, COLOR_CARD_BG, COLOR_INPUT_BG
+        global COLOR_CYAN_NEON, COLOR_CYAN_HOVER, COLOR_GOLD, COLOR_GOLD_HOVER
+        global COLOR_RED, COLOR_RED_HOVER, COLOR_TEXT_MUTED, COLOR_TEXT_LIGHT
+
+        if theme_name not in THEMES:
+            theme_name = "Cyber-Owl"
+        self._active_theme = theme_name
+        t = THEMES[theme_name]
+
+        COLOR_BG_DARK    = t["bg"];      COLOR_CARD_BG    = t["card_bg"]
+        COLOR_INPUT_BG   = t["input_bg"]
+        COLOR_CYAN_NEON  = t["accent"];  COLOR_CYAN_HOVER = t["accent_hover"]
+        COLOR_GOLD       = t["gold"];    COLOR_GOLD_HOVER = t["gold_hover"]
+        COLOR_RED        = t["danger"];  COLOR_RED_HOVER  = t["danger_hover"]
+        COLOR_TEXT_MUTED = t["text_muted"]; COLOR_TEXT_LIGHT = t["text"]
+
+        save_theme_config(theme_name)
+
+        fonts = t["fonts"]
+        cr    = t["corner_radius"]
+        pbw   = t["btn_primary_border"]
+        tw    = getattr(self, "_tw", {})
+
+        try:
+            self.configure(fg_color=t["bg"])
+        except Exception:
+            pass
+
+        for w in tw.get("label_title", []):
+            try:
+                w.configure(text_color=t["accent"], font=fonts["title"])
+            except Exception:
+                pass
+
+        for w in tw.get("label_muted", []):
+            try:
+                w.configure(text_color=t["text_muted"], font=fonts["subtitle"])
+            except Exception:
+                pass
+
+        for w in tw.get("label_body", []):
+            try:
+                w.configure(text_color=t["text"], font=fonts["section"])
+            except Exception:
+                pass
+
+        for w in tw.get("frame_card", []):
+            try:
+                w.configure(fg_color=t["card_bg"], corner_radius=cr)
+            except Exception:
+                pass
+
+        for w in tw.get("input", []):
+            try:
+                w.configure(fg_color=t["input_bg"], border_color=t["card_bg"],
+                            text_color=t["text"])
+            except Exception:
+                pass
+
+        for w in tw.get("textbox", []):
+            try:
+                w.configure(fg_color=t["input_bg"], border_color=t["card_bg"],
+                            text_color=t["text"])
+            except Exception:
+                pass
+
+        for w in tw.get("btn_primary_sm", []):
+            try:
+                w.configure(fg_color=t["accent"], hover_color=t["accent_hover"],
+                            text_color=t["accent_text"], corner_radius=cr,
+                            border_width=pbw,
+                            border_color=t["accent"] if pbw else t["card_bg"])
+            except Exception:
+                pass
+
+        for w in tw.get("btn_gold", []):
+            try:
+                w.configure(fg_color=t["gold"], hover_color=t["gold_hover"],
+                            text_color=t["bg"], corner_radius=cr,
+                            font=fonts["btn_md"])
+            except Exception:
+                pass
+
+        _icon_hover = t.get("icon_hover", t["secondary_hover"])
+
+        for w in tw.get("btn_accent_icon", []):
+            try:
+                w.configure(fg_color=t["card_bg"], hover_color=_icon_hover,
+                            text_color=t["accent"], border_color=t["accent"],
+                            corner_radius=cr)
+            except Exception:
+                pass
+
+        for w in tw.get("btn_gold_icon", []):
+            try:
+                w.configure(fg_color=t["card_bg"], hover_color=_icon_hover,
+                            text_color=t["gold"], border_color=t["gold"],
+                            corner_radius=cr)
+            except Exception:
+                pass
+
+        for w in tw.get("btn_danger_icon", []):
+            try:
+                w.configure(fg_color=t["card_bg"], hover_color=_icon_hover,
+                            text_color=t["danger"], border_color=t["danger"],
+                            corner_radius=cr)
+            except Exception:
+                pass
+
+        for w in tw.get("checkbox", []):
+            try:
+                w.configure(text_color=t["text"], fg_color=t["accent"],
+                            hover_color=t["accent_hover"], border_color=t["text_muted"],
+                            checkmark_color=t["text"])
+            except Exception:
+                pass
+
+        try:
+            self.status_lbl.configure(text_color=t["accent"])
+        except Exception:
+            pass
+
+        if getattr(self, "_paused_mode", False):
+            self._show_paused_toggle()
+        else:
+            self._show_normal_toggle()
+
+        try:
+            jh_results_ui.apply_theme(t)
+        except Exception:
+            pass
+
+        try:
+            import jh_notifications
+            jh_notifications.apply_theme(t)
+        except Exception:
+            pass
+
+    # ── API Help ──────────────────────────────────────────────────────────────
+
     def show_api_help(self):
-        """Отображает справку о получении бесплатного API-ключа."""
         help_win = ctk.CTkToplevel(self)
         help_win.withdraw()
         help_win.title(tr("help_win_title"))
         help_win.configure(fg_color=COLOR_BG_DARK)
-
         force_dark_title_bar(help_win)
 
         help_header = ctk.CTkFrame(help_win, fg_color="transparent")
@@ -770,35 +1088,29 @@ class JobHunterApp(ctk.CTk):
         if help_logo:
             ctk.CTkLabel(help_header, image=help_logo, text="").pack(side="left", padx=(0, 8))
         ctk.CTkLabel(
-            help_header,
-            text=tr("help_title"),
-            font=("Arial", 14, "bold"),
-            text_color=COLOR_CYAN_NEON
+            help_header, text=tr("help_title"),
+            font=("Arial", 14, "bold"), text_color=COLOR_CYAN_NEON
         ).pack(side="left")
 
         ctk.CTkLabel(
-            help_win,
-            text=tr("help_text"),
-            font=("Arial", 11),
-            text_color=COLOR_TEXT_LIGHT,
-            justify="left"
+            help_win, text=tr("help_text"),
+            font=("Arial", 11), text_color=COLOR_TEXT_LIGHT, justify="left"
         ).pack(padx=25, pady=5)
 
         ctk.CTkButton(
-            help_win,
-            text=tr("help_btn"),
-            font=("Arial", 11, "bold"),
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            text_color=COLOR_BG_DARK,
-            height=36,
+            help_win, text=tr("help_btn"),
+            font=("Arial", 11, "bold"), fg_color=COLOR_CYAN_NEON,
+            hover_color=COLOR_CYAN_HOVER, text_color=COLOR_BG_DARK, height=36,
             command=lambda: webbrowser.open("https://aistudio.google.com/")
         ).pack(pady=(15, 5))
 
-        def _show_help():
-            if not help_win.winfo_exists(): return
-            try: help_win.attributes("-alpha", 0.0)
-            except Exception: pass
+        def _show():
+            if not help_win.winfo_exists():
+                return
+            try:
+                help_win.attributes("-alpha", 0.0)
+            except Exception:
+                pass
             try:
                 help_win.update_idletasks()
                 w, h = 460, 260
@@ -806,33 +1118,35 @@ class JobHunterApp(ctk.CTk):
                     sc = help_win._get_window_scaling()
                 except Exception:
                     sc = 1.0
-                # w/h логические → физические для арифметики; x/y остаются физическими
-                child_phys_w, child_phys_h = w * sc, h * sc
-                px = self.winfo_rootx()
-                py = self.winfo_rooty()
-                pw = self.winfo_width()
-                ph = self.winfo_height()
-                x = int(px + (pw - child_phys_w) / 2)
-                y = int(py + (ph - child_phys_h) / 2)
-                help_win.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
+                cpw, cph = w * sc, h * sc
+                px = self.winfo_rootx();  py = self.winfo_rooty()
+                pw = self.winfo_width();  ph = self.winfo_height()
+                x = int(px + (pw - cpw) / 2)
+                y = int(py + (ph - cph) / 2)
+                help_win.geometry(f"{w}x{h}+{max(0,x)}+{max(0,y)}")
             except Exception:
                 help_win.geometry("460x260")
             help_win.deiconify()
             help_win.grab_set()
             help_win.focus_force()
             def _fin():
-                if not help_win.winfo_exists(): return
+                if not help_win.winfo_exists():
+                    return
                 try:
                     _apply_icon_win32(help_win)
-                except Exception: pass
-                try: help_win.attributes("-alpha", 1.0)
-                except Exception: pass
+                except Exception:
+                    pass
+                try:
+                    help_win.attributes("-alpha", 1.0)
+                except Exception:
+                    pass
                 help_win.after(350, lambda: _apply_icon_win32(help_win) if help_win.winfo_exists() else None)
             help_win.after(100, _fin)
-        help_win.after(120, _show_help)
+        help_win.after(120, _show)
+
+    # ── Local / cloud provider status ─────────────────────────────────────────
 
     def set_cloud_provider_status(self, provider):
-        """Стандартная статус-плашка для облачных провайдеров."""
         api_key = self.app_config.get("api_keys", {}).get(provider, "").strip()
         if not api_key:
             self.update_status(tr("status_key_required", provider=provider), COLOR_GOLD)
@@ -840,12 +1154,8 @@ class JobHunterApp(ctk.CTk):
             self.update_status(tr("status_loaded"), COLOR_CYAN_NEON)
 
     def update_local_server_status(self, provider, _silent=False):
-        """
-        Runs a background check of the local server and updates the status label.
-        When _silent=True (called from the poll loop), skips the 'checking...' flash.
-        Automatically reschedules itself every 10s while local provider is active.
-        """
-        servers = self.app_config.get("local_servers", {}) or {}
+        """Probes the local AI server and reschedules itself every 10 s."""
+        servers  = self.app_config.get("local_servers", {}) or {}
         defaults = {"Ollama": "http://localhost:11434", "LM Studio": "http://localhost:1234"}
         base_url = servers.get(provider, defaults.get(provider))
 
@@ -856,7 +1166,7 @@ class JobHunterApp(ctk.CTk):
             try:
                 is_up, msg = jh_ai_engine.check_local_server(provider, base_url)
             except Exception as e:
-                print(f"[Локальный статус]: Ошибка проверки сервера: {e}")
+                print(f"[LocalStatus]: {e}")
                 is_up, msg = False, "Server unreachable"
 
             def _apply():
@@ -864,15 +1174,13 @@ class JobHunterApp(ctk.CTk):
                     return
                 prev_ok = self._local_server_ok
                 self._local_server_ok = is_up
-                color = COLOR_CYAN_NEON if is_up else COLOR_GOLD
+                color  = COLOR_CYAN_NEON if is_up else COLOR_GOLD
                 prefix = "● " if is_up else "⚠ "
                 if not self.is_active:
                     self.update_status(prefix + msg, color)
                 elif not is_up and prev_ok:
-                    # Server went offline while assistant was running
                     self.update_status(tr("status_server_down", provider=provider), COLOR_RED)
 
-                # Reschedule if still on this local provider
                 if self.app_config.get("current_provider") == provider and provider in LOCAL_PROVIDERS:
                     if self._server_poll_after_id is not None:
                         try:
@@ -882,7 +1190,6 @@ class JobHunterApp(ctk.CTk):
                     self._server_poll_after_id = self.after(
                         10000, lambda: self.update_local_server_status(provider, _silent=True)
                     )
-
             try:
                 self.after(0, _apply)
             except Exception:
@@ -891,11 +1198,6 @@ class JobHunterApp(ctk.CTk):
         threading.Thread(target=_probe, daemon=True).start()
 
     def maybe_show_local_llm_warning(self, parent_win):
-        """
-        Показывает модальное предупреждение о требованиях к скорости локальных LLM,
-        если флаг show_local_llm_warning в config.json включён (или отсутствует).
-        Содержит чекбокс 'Больше не показывать', сохраняющий флаг в config.json.
-        """
         if not jh_storage_manager.should_show_local_warning(self.app_config):
             return
 
@@ -906,40 +1208,24 @@ class JobHunterApp(ctk.CTk):
         force_dark_title_bar(warn)
         warn.transient(parent_win)
 
-        ctk.CTkLabel(
-            warn,
-            text=tr("warn_title"),
-            font=("Arial", 16, "bold"),
-            text_color=COLOR_GOLD
-        ).pack(pady=(20, 10), padx=20)
-
-        ctk.CTkLabel(
-            warn,
-            text=tr("warn_text", min_tps=jh_ai_engine.MIN_TOKENS_PER_SEC),
-            font=("Arial", 11),
-            text_color=COLOR_TEXT_LIGHT,
-            justify="left"
-        ).pack(padx=25, pady=5)
+        ctk.CTkLabel(warn, text=tr("warn_title"), font=("Arial", 16, "bold"),
+                     text_color=COLOR_GOLD).pack(pady=(20, 10), padx=20)
+        ctk.CTkLabel(warn, text=tr("warn_text", min_tps=jh_ai_engine.MIN_TOKENS_PER_SEC),
+                     font=("Arial", 11), text_color=COLOR_TEXT_LIGHT,
+                     justify="left").pack(padx=25, pady=5)
 
         dont_show_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
-            warn,
-            text=tr("warn_dont_show"),
-            variable=dont_show_var,
-            text_color=COLOR_TEXT_MUTED,
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            border_color=COLOR_TEXT_MUTED,
-            checkbox_width=20,
-            checkbox_height=20,
-            border_width=2,
+            warn, text=tr("warn_dont_show"), variable=dont_show_var,
+            text_color=COLOR_TEXT_MUTED, fg_color=COLOR_CYAN_NEON,
+            hover_color=COLOR_CYAN_HOVER, border_color=COLOR_TEXT_MUTED,
+            checkbox_width=20, checkbox_height=20, border_width=2,
             checkmark_color=COLOR_TEXT_LIGHT
         ).pack(pady=(10, 5))
 
         def close_warning():
             if dont_show_var.get():
                 self.app_config["show_local_llm_warning"] = False
-                # Асинхронное сохранение: read-modify-write на диск не блокирует UI-поток
                 self._set_show_local_warning_async(False)
             try:
                 warn.grab_release()
@@ -952,22 +1238,19 @@ class JobHunterApp(ctk.CTk):
                 pass
 
         ctk.CTkButton(
-            warn,
-            text=tr("warn_ok"),
-            font=("Arial", 12, "bold"),
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            text_color=COLOR_BG_DARK,
-            height=38,
-            command=close_warning
+            warn, text=tr("warn_ok"), font=("Arial", 12, "bold"),
+            fg_color=COLOR_CYAN_NEON, hover_color=COLOR_CYAN_HOVER,
+            text_color=COLOR_BG_DARK, height=38, command=close_warning
         ).pack(pady=(10, 15))
-
         warn.protocol("WM_DELETE_WINDOW", close_warning)
 
         def _show_warn():
-            if not warn.winfo_exists(): return
-            try: warn.attributes("-alpha", 0.0)
-            except Exception: pass
+            if not warn.winfo_exists():
+                return
+            try:
+                warn.attributes("-alpha", 0.0)
+            except Exception:
+                pass
             try:
                 warn.update_idletasks()
                 w, h = 500, 400
@@ -975,118 +1258,121 @@ class JobHunterApp(ctk.CTk):
                     sc = warn._get_window_scaling()
                 except Exception:
                     sc = 1.0
-                # w/h логические → физические для арифметики; x/y остаются физическими
-                child_phys_w, child_phys_h = w * sc, h * sc
+                cpw, cph = w * sc, h * sc
                 if parent_win and parent_win.winfo_exists():
-                    px = parent_win.winfo_rootx()
-                    py = parent_win.winfo_rooty()
-                    pw = parent_win.winfo_width()
-                    ph = parent_win.winfo_height()
-                    x = int(px + (pw - child_phys_w) / 2)
-                    y = int(py + (ph - child_phys_h) / 2)
+                    px = parent_win.winfo_rootx(); py = parent_win.winfo_rooty()
+                    pw = parent_win.winfo_width(); ph = parent_win.winfo_height()
+                    x  = int(px + (pw - cpw) / 2)
+                    y  = int(py + (ph - cph) / 2)
                 else:
-                    x = int((warn.winfo_screenwidth() - child_phys_w) / 2)
-                    y = int((warn.winfo_screenheight() - child_phys_h) / 2)
-                warn.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
+                    x = int((warn.winfo_screenwidth()  - cpw) / 2)
+                    y = int((warn.winfo_screenheight() - cph) / 2)
+                warn.geometry(f"{w}x{h}+{max(0,x)}+{max(0,y)}")
             except Exception:
                 warn.geometry("500x400")
-            warn.deiconify()
-            warn.grab_set()
-            warn.focus_force()
+            warn.deiconify(); warn.grab_set(); warn.focus_force()
             def _fin():
-                if not warn.winfo_exists(): return
+                if not warn.winfo_exists():
+                    return
                 try:
                     _apply_icon_win32(warn)
-                except Exception: pass
-                try: warn.attributes("-alpha", 1.0)
-                except Exception: pass
+                except Exception:
+                    pass
+                try:
+                    warn.attributes("-alpha", 1.0)
+                except Exception:
+                    pass
                 warn.after(350, lambda: _apply_icon_win32(warn) if warn.winfo_exists() else None)
             warn.after(100, _fin)
         warn.after(120, _show_warn)
 
+    # ── AI Settings window ────────────────────────────────────────────────────
+
     def open_ai_settings_window(self):
-        """Модальное окно настройки провайдера ИИ с блокировкой слайдера для локальных."""
         settings_win = ctk.CTkToplevel(self)
         settings_win.withdraw()
         settings_win.title("AI Settings")
         settings_win.configure(fg_color=COLOR_BG_DARK)
         force_dark_title_bar(settings_win)
 
-        # ── Заголовочный фрейм: title | help | EN/RU ──────────────────────────
+        _t  = THEMES.get(self._active_theme, THEMES["Cyber-Owl"])
+        _ff = _t["fonts"]["section"][0]   # "Arial" or "Courier New"
+        _f_title    = (_ff, 16, "bold")
+        _f_label    = (_ff, 12, "bold")
+        _f_seg      = (_ff, 11, "bold")
+        _f_preview  = (_ff, 14, "bold")
+        _f_save     = (_ff, 13, "bold")
+        _seg_hover  = _t.get("secondary_hover", COLOR_INPUT_BG)  # lighter than card for hover
+
+        # ── Title row ──────────────────────────────────────────────────────────
         title_frame = ctk.CTkFrame(settings_win, fg_color="transparent")
-        title_frame.pack(pady=(18, 8), padx=30, fill="x")
+        title_frame.pack(pady=(10, 4), padx=30, fill="x")
         title_frame.columnconfigure(0, weight=1)
         title_frame.columnconfigure(1, weight=0)
         title_frame.columnconfigure(2, weight=0)
 
         ctk.CTkLabel(
-            title_frame,
-            text=tr("settings_title"),
-            font=("Arial", 16, "bold"),
-            text_color=COLOR_CYAN_NEON
+            title_frame, text=tr("settings_title"),
+            font=_f_title, text_color=COLOR_CYAN_NEON
         ).grid(row=0, column=0, sticky="w")
 
         ctk.CTkButton(
-            title_frame,
-            text=tr("settings_help"),
-            font=("Arial", 11, "bold"),
-            text_color=COLOR_CYAN_NEON,
-            fg_color="transparent",
-            hover_color=COLOR_INPUT_BG,
-            width=75,
-            height=25,
-            command=self.show_api_help
+            title_frame, text=tr("settings_help"),
+            font=_f_seg, text_color=COLOR_CYAN_NEON,
+            fg_color="transparent", hover_color=COLOR_INPUT_BG,
+            width=75, height=25, command=self.show_api_help
         ).grid(row=0, column=1, sticky="e", padx=(0, 6))
 
-        # EN / RU переключатель ────────────────────────────────────────────────
         lang_seg = ctk.CTkSegmentedButton(
-            title_frame,
-            values=["EN", "RU"],
-            font=("Arial", 11, "bold"),
-            selected_color=COLOR_CYAN_NEON,
-            selected_hover_color=COLOR_CYAN_HOVER,
-            unselected_color=COLOR_CARD_BG,
-            unselected_hover_color=COLOR_INPUT_BG,
-            text_color=COLOR_BG_DARK,
-            width=70,
-            height=25,
+            title_frame, values=["EN", "RU"],
+            font=_f_seg,
+            selected_color=COLOR_CYAN_NEON, selected_hover_color=COLOR_CYAN_HOVER,
+            unselected_color=COLOR_CARD_BG, unselected_hover_color=_seg_hover,
+            text_color=COLOR_TEXT_LIGHT, width=70, height=25,
         )
         lang_seg.set(jh_i18n.get_language().upper())
         lang_seg.grid(row=0, column=2, sticky="e")
 
-        # ── Разделитель ────────────────────────────────────────────────────────
-        ctk.CTkFrame(settings_win, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", padx=30, pady=(0, 12))
+        ctk.CTkFrame(settings_win, fg_color=COLOR_CARD_BG, height=1).pack(
+            fill="x", padx=24, pady=(0, 4)
+        )
 
-        # ── Провайдер ──────────────────────────────────────────────────────────
-        ctk.CTkLabel(
-            settings_win,
-            text=tr("provider_label"),
-            font=("Arial", 12, "bold"),
-            text_color=COLOR_TEXT_LIGHT
-        ).pack(anchor="w", padx=30, pady=(0, 3))
+        # ── Two-column scrollable body ─────────────────────────────────────────
+        _scroll = ctk.CTkScrollableFrame(
+            settings_win, fg_color=COLOR_BG_DARK,
+            scrollbar_button_color=COLOR_INPUT_BG,
+            scrollbar_button_hover_color=COLOR_CARD_BG,
+        )
+        _scroll.pack(fill="both", expand=True)
+        _scroll.columnconfigure(0, weight=1)
+        _scroll.columnconfigure(1, weight=1)
+        _scroll.rowconfigure(0, weight=1)
+        _scroll.rowconfigure(1, weight=0)
 
-        model_checkboxes = []
-        model_group_frame = ctk.CTkFrame(settings_win, fg_color=COLOR_CARD_BG, corner_radius=8)
+        _left = ctk.CTkFrame(_scroll, fg_color="transparent")
+        _left.grid(row=0, column=0, sticky="nsew", padx=(20, 6), pady=(4, 0))
 
-        temp_api_keys = self.app_config.get("api_keys", {}).copy()
-        current_prov_var = ctk.StringVar(value=self.app_config.get("current_provider", "Gemini"))
+        _right = ctk.CTkFrame(_scroll, fg_color="transparent")
+        _right.grid(row=0, column=1, sticky="nsew", padx=(6, 20), pady=(4, 0))
 
-        # ── Ссылка на слайдер (создаётся позже, guard через список) ───────────
-        _slider_ref = [None]
-        _delay_lbl_var = ctk.StringVar()
+        model_checkboxes   = []
+        model_group_frame  = ctk.CTkFrame(_left, fg_color=COLOR_CARD_BG, corner_radius=8)
+        temp_api_keys      = self.app_config.get("api_keys", {}).copy()
+        current_prov_var   = ctk.StringVar(value=self.app_config.get("current_provider", "Gemini"))
+        _slider_ref        = [None]
+        _delay_lbl_var     = ctk.StringVar()
+        _initialized       = [False]
 
         def _update_delay_label(val):
             _delay_lbl_var.set(tr("delay_label", val=int(float(val))))
 
-        def _apply_slider_state(provider):
+        def _apply_slider_state(_provider):
             slider = _slider_ref[0]
-            if slider is None:
-                return
-            slider.configure(state="normal")
-            _update_delay_label(slider.get())
+            if slider is not None:
+                slider.configure(state="normal")
+                _update_delay_label(slider.get())
 
         def _reapply_show_mask():
-            """CTkEntry сбрасывает show='*' при configure(state=...) — восстанавливаем."""
             try:
                 api_key_entry.configure(show="*")
             except Exception:
@@ -1102,41 +1388,30 @@ class JobHunterApp(ctk.CTk):
                 try:
                     api_key_entry.configure(state="normal")
                     api_key_entry.delete(0, "end")
-                    api_key_entry.configure(
-                        state="disabled",
-                        placeholder_text=tr("key_placeholder_local")
-                    )
+                    api_key_entry.configure(state="disabled",
+                                            placeholder_text=tr("key_placeholder_local"))
                     _reapply_show_mask()
                 except Exception as e:
-                    print(f"[Настройки ИИ]: Не удалось заблокировать поле ключа: {e}")
+                    print(f"[Settings]: {e}")
             else:
                 try:
-                    api_key_entry.configure(
-                        state="normal",
-                        placeholder_text=tr("key_placeholder")
-                    )
+                    api_key_entry.configure(state="normal",
+                                            placeholder_text=tr("key_placeholder"))
                     saved_key = temp_api_keys.get(provider, "")
                     api_key_entry.delete(0, "end")
                     if saved_key:
                         api_key_entry.insert(0, saved_key)
-                    # Re-apply AFTER insert: configure(state=...) and insert()
-                    # both reset show="*" in CTkEntry internally.
                     _reapply_show_mask()
                 except Exception as e:
-                    print(f"[Настройки ИИ]: Не удалось разблокировать поле ключа: {e}")
-
-        # Флаг: при первом (инициализационном) вызове on_provider_changed поле
-        # api_key_entry только что создано и пустое — захватывать нечего.
-        # Без флага пустой get() перетирает сохранённый ключ в temp_api_keys.
-        _initialized = [False]
+                    print(f"[Settings]: {e}")
 
         def on_provider_changed(new_provider):
             if _initialized[0]:
-                old_provider = self.app_config.get("current_provider", "Gemini")
-                if old_provider not in LOCAL_PROVIDERS:
+                old = self.app_config.get("current_provider", "Gemini")
+                if old not in LOCAL_PROVIDERS:
                     try:
                         if str(api_key_entry.cget("state")) != "disabled":
-                            temp_api_keys[old_provider] = api_key_entry.get().strip()
+                            temp_api_keys[old] = api_key_entry.get().strip()
                     except Exception:
                         pass
 
@@ -1152,18 +1427,12 @@ class JobHunterApp(ctk.CTk):
                 active_list = self.app_config["active_models"].get(new_provider, [])
                 cb_var = ctk.BooleanVar(value=(m_name in active_list))
                 cb = ctk.CTkCheckBox(
-                    model_group_frame,
-                    text=m_name,
-                    variable=cb_var,
-                    text_color=COLOR_TEXT_LIGHT,
-                    fg_color=COLOR_CYAN_NEON,
-                    hover_color=COLOR_CYAN_HOVER,
-                    border_color=COLOR_TEXT_MUTED,
-                    checkbox_width=20,
-                    checkbox_height=20,
-                    border_width=2,
+                    model_group_frame, text=m_name, variable=cb_var,
+                    text_color=COLOR_TEXT_LIGHT, fg_color=COLOR_CYAN_NEON,
+                    hover_color=COLOR_CYAN_HOVER, border_color=COLOR_TEXT_MUTED,
+                    checkbox_width=20, checkbox_height=20, border_width=2,
                     checkmark_color=COLOR_TEXT_LIGHT,
-                    command=lambda name=m_name, var=cb_var: update_active_models(new_provider, name, var.get())
+                    command=lambda n=m_name, v=cb_var: _update_active_models(new_provider, n, v.get())
                 )
                 cb.pack(anchor="w", padx=15, pady=6)
                 model_checkboxes.append(cb)
@@ -1176,7 +1445,7 @@ class JobHunterApp(ctk.CTk):
                 self._local_server_ok = True
                 self.set_cloud_provider_status(new_provider)
 
-        def update_active_models(provider, name, is_selected):
+        def _update_active_models(provider, name, is_selected):
             if provider not in self.app_config["active_models"]:
                 self.app_config["active_models"][provider] = []
             curr = self.app_config["active_models"][provider]
@@ -1185,154 +1454,196 @@ class JobHunterApp(ctk.CTk):
             elif not is_selected and name in curr:
                 curr.remove(name)
 
+        # ── Left column: AI provider ───────────────────────────────────────────
+        ctk.CTkLabel(_left, text=tr("provider_label"),
+                     font=_f_label, text_color=COLOR_TEXT_LIGHT
+                     ).pack(anchor="w", pady=(0, 3))
+
         provider_dropdown = ctk.CTkOptionMenu(
-            settings_win,
-            values=PROVIDER_ORDER,
-            variable=current_prov_var,
+            _left, values=PROVIDER_ORDER, variable=current_prov_var,
             command=on_provider_changed,
-            fg_color=COLOR_CARD_BG,
-            button_color=COLOR_INPUT_BG,
-            button_hover_color=COLOR_CARD_BG,
-            text_color=COLOR_TEXT_LIGHT,
-            dropdown_fg_color=COLOR_CARD_BG,
-            dropdown_hover_color=COLOR_INPUT_BG,
+            fg_color=COLOR_CARD_BG, button_color=COLOR_INPUT_BG,
+            button_hover_color=COLOR_CARD_BG, text_color=COLOR_TEXT_LIGHT,
+            dropdown_fg_color=COLOR_CARD_BG, dropdown_hover_color=COLOR_INPUT_BG,
             dropdown_text_color=COLOR_TEXT_LIGHT
         )
-        provider_dropdown.pack(pady=(3, 12), padx=30, fill="x")
+        provider_dropdown.pack(pady=(0, 6), fill="x")
 
-        ctk.CTkLabel(
-            settings_win,
-            text=tr("key_label"),
-            font=("Arial", 12, "bold"),
-            text_color=COLOR_TEXT_LIGHT
-        ).pack(anchor="w", padx=30, pady=(0, 3))
+        ctk.CTkFrame(_left, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", pady=(0, 4))
+
+        ctk.CTkLabel(_left, text=tr("key_label"),
+                     font=_f_label, text_color=COLOR_TEXT_LIGHT
+                     ).pack(anchor="w", pady=(0, 3))
 
         api_key_entry = ctk.CTkEntry(
-            settings_win,
-            height=40,
-            fg_color=COLOR_INPUT_BG,
-            border_color=COLOR_CARD_BG,
-            text_color=COLOR_TEXT_LIGHT,
-            placeholder_text=tr("key_placeholder"),
-            show="*"
+            _left, height=40, fg_color=COLOR_INPUT_BG, border_color=COLOR_CARD_BG,
+            text_color=COLOR_TEXT_LIGHT, placeholder_text=tr("key_placeholder"), show="*"
         )
-        api_key_entry.pack(pady=(3, 12), padx=30, fill="x")
+        api_key_entry.pack(pady=(0, 6), fill="x")
         bind_russian_hotkeys(api_key_entry)
 
-        ctk.CTkLabel(
-            settings_win,
-            text=tr("models_label"),
-            font=("Arial", 12, "bold"),
-            text_color=COLOR_TEXT_LIGHT
-        ).pack(anchor="w", padx=30, pady=(0, 3))
+        ctk.CTkFrame(_left, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", pady=(0, 4))
 
-        model_group_frame.pack(pady=(3, 14), padx=30, fill="x")
+        ctk.CTkLabel(_left, text=tr("models_label"),
+                     font=_f_label, text_color=COLOR_TEXT_LIGHT
+                     ).pack(anchor="w", pady=(0, 3))
 
-        # Инициализируем состояние под текущего провайдера.
-        # После вызова взводим флаг — теперь on_provider_changed будет захватывать ключ.
+        model_group_frame.pack(pady=(0, 6), fill="x")
+
         on_provider_changed(current_prov_var.get())
         _initialized[0] = True
 
-        # ── Разделитель ────────────────────────────────────────────────────────
-        ctk.CTkFrame(settings_win, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", padx=30, pady=(0, 12))
-
-        # ── Слайдер задержки ───────────────────────────────────────────────────
-        ctk.CTkLabel(
-            settings_win,
-            textvariable=_delay_lbl_var,
-            font=("Arial", 12, "bold"),
-            text_color=COLOR_TEXT_LIGHT
-        ).pack(anchor="w", padx=30, pady=(0, 3))
+        # ── Right column: behaviour / hotkey ──────────────────────────────────
+        ctk.CTkLabel(_right, textvariable=_delay_lbl_var,
+                     font=_f_label, text_color=COLOR_TEXT_LIGHT
+                     ).pack(anchor="w", pady=(0, 3))
 
         current_delay = self.app_config.get("request_delay", 15)
         delay_slider = ctk.CTkSlider(
-            settings_win,
-            from_=0,
-            to=60,
-            number_of_steps=60,
+            _right, from_=0, to=60, number_of_steps=60,
             command=_update_delay_label,
-            button_color=COLOR_CYAN_NEON,
-            button_hover_color=COLOR_CYAN_HOVER,
-            progress_color=COLOR_CYAN_NEON,
-            fg_color=COLOR_INPUT_BG
+            button_color=COLOR_CYAN_NEON, button_hover_color=COLOR_CYAN_HOVER,
+            progress_color=COLOR_CYAN_NEON, fg_color=COLOR_INPUT_BG
         )
-        delay_slider.pack(pady=(3, 14), padx=30, fill="x")
+        delay_slider.pack(pady=(0, 6), fill="x")
         delay_slider.set(current_delay)
         _slider_ref[0] = delay_slider
         _apply_slider_state(current_prov_var.get())
 
-        # ── Разделитель ────────────────────────────────────────────────────────
-        ctk.CTkFrame(settings_win, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", padx=30, pady=(0, 12))
+        ctk.CTkFrame(_right, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", pady=(0, 4))
 
-        # ── Строгость фильтра ──────────────────────────────────────────────────
-        ctk.CTkLabel(
-            settings_win,
-            text=tr("strictness_label"),
-            font=("Arial", 12, "bold"),
-            text_color=COLOR_TEXT_LIGHT
-        ).pack(anchor="w", padx=30, pady=(0, 3))
+        # ── Filter strictness ──────────────────────────────────────────────────
+        ctk.CTkLabel(_right, text=tr("strictness_label"),
+                     font=_f_label, text_color=COLOR_TEXT_LIGHT
+                     ).pack(anchor="w", pady=(0, 3))
 
         strictness_labels = [tr("strictness_mild"), tr("strictness_balanced"), tr("strictness_strict")]
         strictness_seg = ctk.CTkSegmentedButton(
-            settings_win,
-            values=strictness_labels,
-            font=("Arial", 11, "bold"),
-            selected_color=COLOR_CYAN_NEON,
-            selected_hover_color=COLOR_CYAN_HOVER,
-            unselected_color=COLOR_CARD_BG,
-            unselected_hover_color=COLOR_INPUT_BG,
-            text_color=COLOR_BG_DARK,
+            _right, values=strictness_labels, font=_f_seg,
+            selected_color=COLOR_CYAN_NEON, selected_hover_color=COLOR_CYAN_HOVER,
+            unselected_color=COLOR_CARD_BG, unselected_hover_color=_seg_hover,
+            text_color=COLOR_TEXT_LIGHT,
         )
-        strictness_seg.pack(pady=(3, 14), padx=30, fill="x")
+        strictness_seg.pack(pady=(0, 6), fill="x")
         current_strictness = self.app_config.get("filter_strictness", 2)
         strictness_seg.set(strictness_labels[max(0, min(2, current_strictness - 1))])
 
-        # ── Длина сопроводительного письма ─────────────────────────────────────
-        ctk.CTkLabel(
-            settings_win,
-            text=tr("letter_length_label"),
-            font=("Arial", 12, "bold"),
-            text_color=COLOR_TEXT_LIGHT
-        ).pack(anchor="w", padx=30, pady=(0, 3))
+        ctk.CTkFrame(_right, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", pady=(0, 4))
+
+        # ── Letter length ──────────────────────────────────────────────────────
+        ctk.CTkLabel(_right, text=tr("letter_length_label"),
+                     font=_f_label, text_color=COLOR_TEXT_LIGHT
+                     ).pack(anchor="w", pady=(0, 3))
 
         letter_labels = [tr("letter_short"), tr("letter_balanced"), tr("letter_detailed")]
         letter_seg = ctk.CTkSegmentedButton(
-            settings_win,
-            values=letter_labels,
-            font=("Arial", 11, "bold"),
-            selected_color=COLOR_CYAN_NEON,
-            selected_hover_color=COLOR_CYAN_HOVER,
-            unselected_color=COLOR_CARD_BG,
-            unselected_hover_color=COLOR_INPUT_BG,
-            text_color=COLOR_BG_DARK,
+            _right, values=letter_labels, font=_f_seg,
+            selected_color=COLOR_CYAN_NEON, selected_hover_color=COLOR_CYAN_HOVER,
+            unselected_color=COLOR_CARD_BG, unselected_hover_color=_seg_hover,
+            text_color=COLOR_TEXT_LIGHT,
         )
-        letter_seg.pack(pady=(3, 14), padx=30, fill="x")
+        letter_seg.pack(pady=(0, 6), fill="x")
         current_letter = self.app_config.get("letter_length", 2)
         letter_seg.set(letter_labels[max(0, min(2, current_letter - 1))])
 
-        # ── Разделитель ────────────────────────────────────────────────────────
-        ctk.CTkFrame(settings_win, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", padx=30, pady=(0, 12))
+        ctk.CTkFrame(_right, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", pady=(0, 4))
 
-        # ── Уведомления ────────────────────────────────────────────────────────
-        notif_var = ctk.BooleanVar(value=bool(self.app_config.get("notifications_enabled", True)))
-        notif_cb = ctk.CTkCheckBox(
-            settings_win,
-            text=tr("cb_notifications"),
-            variable=notif_var,
-            text_color=COLOR_TEXT_LIGHT,
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            border_color=COLOR_TEXT_MUTED,
-            checkbox_width=20,
-            checkbox_height=20,
-            border_width=2,
-            checkmark_color=COLOR_TEXT_LIGHT
+        # ── Capture hotkey (visual selector) ──────────────────────────────────
+        from jh_automation import HotkeySpec as _HotkeySpec
+        _hs = _HotkeySpec.from_config(self.app_config)
+
+        ctk.CTkLabel(_right, text=tr("hotkey_label"),
+                     font=_f_label, text_color=COLOR_TEXT_LIGHT
+                     ).pack(anchor="w", pady=(0, 3))
+
+        _hk_row = ctk.CTkFrame(_right, fg_color="transparent")
+        _hk_row.pack(pady=(0, 4), fill="x")
+        _hk_row.columnconfigure(0, weight=1)
+        _hk_row.columnconfigure(1, weight=1)
+        _hk_row.columnconfigure(2, weight=1)
+
+        _dd_kw = dict(
+            fg_color=COLOR_CARD_BG, button_color=COLOR_INPUT_BG,
+            button_hover_color=COLOR_CARD_BG, text_color=COLOR_TEXT_LIGHT,
+            dropdown_fg_color=COLOR_CARD_BG, dropdown_hover_color=COLOR_INPUT_BG,
+            dropdown_text_color=COLOR_TEXT_LIGHT,
         )
-        notif_cb.pack(anchor="w", padx=30, pady=(0, 14))
 
-        # ── Сохранение / закрытие ──────────────────────────────────────────────
+        _mod1_var = ctk.StringVar(value=_hs.mod1.capitalize())
+        _mod2_var = ctk.StringVar(
+            value="None" if _hs.mod2 == "none" else _hs.mod2.capitalize()
+        )
+        _key_var  = ctk.StringVar(value=_hs.key.upper())
+
+        _hk_preview_var = ctk.StringVar()
+
+        def _refresh_hk_preview(*_):
+            m1 = _mod1_var.get()
+            m2 = _mod2_var.get()
+            k  = _key_var.get()
+            parts = [m1] + ([m2] if m2 != "None" else []) + [k]
+            _hk_preview_var.set("  " + "  +  ".join(parts) + "  ")
+
+        ctk.CTkOptionMenu(
+            _hk_row, values=["Ctrl", "Alt", "Win"],
+            variable=_mod1_var, command=_refresh_hk_preview, **_dd_kw,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 2))
+
+        ctk.CTkOptionMenu(
+            _hk_row, values=["Shift", "None"],
+            variable=_mod2_var, command=_refresh_hk_preview, **_dd_kw,
+        ).grid(row=0, column=1, sticky="ew", padx=2)
+
+        ctk.CTkOptionMenu(
+            _hk_row, values=list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+            variable=_key_var, command=_refresh_hk_preview, **_dd_kw,
+        ).grid(row=0, column=2, sticky="ew", padx=(2, 0))
+
+        _refresh_hk_preview()
+
+        ctk.CTkLabel(
+            _right, textvariable=_hk_preview_var,
+            font=_f_preview, text_color=COLOR_CYAN_NEON,
+            fg_color=COLOR_CARD_BG, corner_radius=6, height=38,
+        ).pack(pady=(0, 6), fill="x")
+
+        ctk.CTkFrame(_right, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", pady=(0, 4))
+
+        # ── Notifications ──────────────────────────────────────────────────────
+        notif_var = ctk.BooleanVar(value=bool(self.app_config.get("notifications_enabled", True)))
+        ctk.CTkCheckBox(
+            _right, text=tr("cb_notifications"), variable=notif_var,
+            text_color=COLOR_TEXT_LIGHT, fg_color=COLOR_CYAN_NEON,
+            hover_color=COLOR_CYAN_HOVER, border_color=COLOR_TEXT_MUTED,
+            checkbox_width=20, checkbox_height=20, border_width=2,
+            checkmark_color=COLOR_TEXT_LIGHT
+        ).pack(anchor="w", pady=(0, 8))
+
+        # ── Theme ──────────────────────────────────────────────────────────────
+        ctk.CTkFrame(_right, fg_color=COLOR_CARD_BG, height=1).pack(fill="x", pady=(0, 4))
+
+        ctk.CTkLabel(_right, text=tr("theme_label"),
+                     font=_f_label, text_color=COLOR_TEXT_LIGHT
+                     ).pack(anchor="w", pady=(0, 3))
+
+        def _apply_theme_and_reopen(name):
+            self.apply_theme(name)
+            settings_win.destroy()
+            self.after(60, self.open_ai_settings_window)
+
+        theme_seg = ctk.CTkSegmentedButton(
+            _right, values=list(THEMES.keys()),
+            font=_f_seg,
+            selected_color=COLOR_CYAN_NEON, selected_hover_color=COLOR_CYAN_HOVER,
+            unselected_color=COLOR_CARD_BG, unselected_hover_color=_seg_hover,
+            text_color=COLOR_TEXT_LIGHT,
+            command=_apply_theme_and_reopen,
+        )
+        theme_seg.set(self._active_theme)
+        theme_seg.pack(pady=(0, 8), fill="x")
+
+        # ── Collect & save ─────────────────────────────────────────────────────
         def _collect_state():
-            """Собирает текущее состояние формы в self.app_config без закрытия окна."""
             active_prov = current_prov_var.get()
             if active_prov in LOCAL_PROVIDERS:
                 temp_api_keys[active_prov] = "local"
@@ -1342,26 +1653,57 @@ class JobHunterApp(ctk.CTk):
                         temp_api_keys[active_prov] = api_key_entry.get().strip()
                 except Exception:
                     pass
-            self.app_config["current_provider"] = active_prov
-            self.app_config["api_keys"] = temp_api_keys
-            self.app_config["request_delay"] = int(delay_slider.get())
-            # Strictness: map label index → 1/2/3
+            self.app_config["current_provider"]   = active_prov
+            self.app_config["api_keys"]            = temp_api_keys
+            self.app_config["request_delay"]       = int(delay_slider.get())
             try:
                 s_idx = strictness_labels.index(strictness_seg.get())
             except ValueError:
                 s_idx = 1
             self.app_config["filter_strictness"] = s_idx + 1
-            # Letter length: map label index → 1/2/3
             try:
                 l_idx = letter_labels.index(letter_seg.get())
             except ValueError:
                 l_idx = 1
-            self.app_config["letter_length"] = l_idx + 1
+            self.app_config["letter_length"]      = l_idx + 1
             self.app_config["notifications_enabled"] = bool(notif_var.get())
+            self.app_config["hotkey"] = {
+                "mod1": _mod1_var.get().lower(),
+                "mod2": _mod2_var.get().lower(),
+                "key":  _key_var.get().upper(),
+            }
 
         def save_and_close():
+            # Guard: refuse to register a bare-letter hotkey (no modifiers).
+            # On Windows, RegisterHotKey with fsModifiers=0 would globally
+            # hijack the physical key, making it untypeable anywhere in the OS
+            # until the process is killed.  required_mods() is empty when both
+            # dropdowns resolve to "none", catching any such configuration.
+            from jh_automation import HotkeySpec as _HotkeySpec
+            _preview = _HotkeySpec(
+                mod1=_mod1_var.get().lower(),
+                mod2=_mod2_var.get().lower(),
+                key=_key_var.get().upper(),
+            )
+            if not _preview.required_mods():
+                messagebox.showerror(
+                    "Invalid Hotkey",
+                    "At least one modifier key (Ctrl, Alt, Shift, or Win) is required.\n\n"
+                    "Registering a bare letter as a global hotkey would make that key "
+                    "untypeable anywhere in the operating system.",
+                    parent=settings_win,
+                )
+                return
             _collect_state()
             jh_storage_manager.save_config(self.app_config)
+            # Re-register hotkey immediately — no app restart required.
+            automation = getattr(self, "_automation", None)
+            if automation is not None:
+                try:
+                    from jh_automation import HotkeySpec
+                    automation.set_hotkey(HotkeySpec.from_config(self.app_config))
+                except Exception as _hk_exc:
+                    print(f"[Settings]: Hotkey re-registration failed: {_hk_exc}")
             self.update_status(tr("status_saved"), COLOR_CYAN_NEON)
             settings_win.destroy()
 
@@ -1373,69 +1715,51 @@ class JobHunterApp(ctk.CTk):
             jh_i18n.set_language(lang_code)
             self.retranslate_main_ui()
             settings_win.destroy()
-            # Небольшая пауза: даём ОС закрыть старое окно до создания нового,
-            # чтобы убрать двойное мигание при переключении языка.
             self.after(80, self.open_ai_settings_window)
 
         lang_seg.configure(command=on_language_changed)
 
+        # ── Fixed footer: Save button always visible outside the scroll area ──
+        ctk.CTkFrame(settings_win, fg_color=COLOR_CARD_BG, height=1).pack(
+            fill="x", padx=24, pady=(4, 0)
+        )
         ctk.CTkButton(
-            settings_win,
-            text=tr("btn_save"),
-            font=("Arial", 13, "bold"),
-            fg_color=COLOR_CYAN_NEON,
-            hover_color=COLOR_CYAN_HOVER,
-            text_color=COLOR_BG_DARK,
-            height=40,
-            command=save_and_close
-        ).pack(pady=(5, 15), padx=30, fill="x")
+            settings_win, text=tr("btn_save"),
+            font=_f_save, fg_color=COLOR_CYAN_NEON,
+            hover_color=COLOR_CYAN_HOVER, text_color=COLOR_BG_DARK,
+            height=40, command=save_and_close
+        ).pack(fill="x", padx=20, pady=(10, 14))
 
-        # ── Показ окна без единого мерцания ────────────────────────────────────
-        # Порядок критичен на Windows:
-        #   1. alpha=0  — окно «невидимо» при показе
-        #   2. geometry — позиция без прыжка
-        #   3. deiconify — создаёт HWND (нужен для iconbitmap)
-        #   4. grab_set / focus_force
-        #   5. after(50): iconbitmap (HWND гарантированно готов) + alpha=1
-        # Вызов iconbitmap ДО deiconify всегда молча проваливается на Windows —
-        # HWND CTkToplevel создаётся только при первом показе окна.
+        # ── Show window ────────────────────────────────────────────────────────
         def _show_window():
             if not settings_win.winfo_exists():
                 return
-            # 1. Скрываем через прозрачность, чтобы не было flash позиции
             try:
                 settings_win.attributes("-alpha", 0.0)
             except Exception:
                 pass
-            # 2. Геометрия — центрируем относительно главного окна
             try:
                 settings_win.update_idletasks()
-                w, h = 450, 760
+                w, h = 700, 520   # two-column layout; scroll absorbs DPI overflow
                 try:
                     sc = settings_win._get_window_scaling()
                 except Exception:
                     sc = 1.0
-                # w/h логические → физические для арифметики; x/y остаются физическими
-                child_phys_w, child_phys_h = w * sc, h * sc
+                cpw, cph = w * sc, h * sc
                 if self.winfo_exists():
-                    px = self.winfo_rootx()
-                    py = self.winfo_rooty()
-                    pw = self.winfo_width()
-                    ph = self.winfo_height()
-                    x = int(px + (pw - child_phys_w) / 2)
-                    y = int(py + (ph - child_phys_h) / 2)
+                    px = self.winfo_rootx(); py = self.winfo_rooty()
+                    pw = self.winfo_width(); ph = self.winfo_height()
+                    x  = int(px + (pw - cpw) / 2)
+                    y  = int(py + (ph - cph) / 2)
                 else:
-                    x = int((settings_win.winfo_screenwidth() - child_phys_w) / 2)
-                    y = int((settings_win.winfo_screenheight() - child_phys_h) / 2)
-                settings_win.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
+                    x = int((settings_win.winfo_screenwidth()  - cpw) / 2)
+                    y = int((settings_win.winfo_screenheight() - cph) / 2)
+                settings_win.geometry(f"{w}x{h}+{max(0,x)}+{max(0,y)}")
             except Exception:
-                settings_win.geometry("450x760")
-            # 3. Показываем (прозрачное) — HWND теперь создан
+                settings_win.geometry("700x520")
             settings_win.deiconify()
             settings_win.grab_set()
             settings_win.focus_force()
-
-            # 4. Иконка + восстановление непрозрачности после создания HWND
             def _finalize():
                 if not settings_win.winfo_exists():
                     return
@@ -1452,21 +1776,20 @@ class JobHunterApp(ctk.CTk):
 
         settings_win.after(120, _show_window)
 
+    # ── Config I/O ────────────────────────────────────────────────────────────
+
     def load_config_to_ui(self):
-        """Загружает сохраненные настройки пользователя в основные поля UI при запуске."""
         self.first_name_input.delete(0, "end")
         self.first_name_input.insert(0, self.app_config.get("first_name", ""))
-        
         self.last_name_input.delete(0, "end")
         self.last_name_input.insert(0, self.app_config.get("last_name", ""))
-        
         self.resume_input.delete("0.0", "end")
         self.resume_input.insert("0.0", self.app_config.get("resume", ""))
-        
-        if not self.app_config.get("filter_remote", True): self.cb_remote.deselect()
-        if self.app_config.get("filter_office", False): self.cb_office.select()
-        if self.app_config.get("filter_hybrid", False): self.cb_hybrid.select()
-        if not self.app_config.get("filter_location", True): self.cb_location.deselect()
+
+        if not self.app_config.get("filter_remote", True):   self.cb_remote.deselect()
+        if self.app_config.get("filter_office", False):       self.cb_office.select()
+        if self.app_config.get("filter_hybrid", False):       self.cb_hybrid.select()
+        if not self.app_config.get("filter_location", True):  self.cb_location.deselect()
         user_loc = self.app_config.get("user_location", "")
         if user_loc:
             self.location_entry.delete(0, "end")
@@ -1481,20 +1804,17 @@ class JobHunterApp(ctk.CTk):
             self.set_cloud_provider_status(provider)
 
     def save_current_config(self):
-        """Синхронизирует текущие введенные настройки UI с конфигом и пишет их на диск."""
-        self.app_config["first_name"] = self.first_name_input.get().strip()
-        self.app_config["last_name"] = self.last_name_input.get().strip()
-        self.app_config["resume"] = self.resume_input.get("0.0", "end-1c").strip()
-        self.app_config["filter_remote"] = bool(self.cb_remote.get())
-        self.app_config["filter_office"] = bool(self.cb_office.get())
-        self.app_config["filter_hybrid"] = bool(self.cb_hybrid.get())
-        self.app_config["filter_location"] = bool(self.cb_location.get())
-        self.app_config["user_location"] = self.location_entry.get().strip()
-        
+        self.app_config["first_name"]       = self.first_name_input.get().strip()
+        self.app_config["last_name"]        = self.last_name_input.get().strip()
+        self.app_config["resume"]           = self.resume_input.get("0.0", "end-1c").strip()
+        self.app_config["filter_remote"]    = bool(self.cb_remote.get())
+        self.app_config["filter_office"]    = bool(self.cb_office.get())
+        self.app_config["filter_hybrid"]    = bool(self.cb_hybrid.get())
+        self.app_config["filter_location"]  = bool(self.cb_location.get())
+        self.app_config["user_location"]    = self.location_entry.get().strip()
         jh_storage_manager.save_config(self.app_config)
 
     def set_inputs_state(self, state):
-        """Управляет доступностью полей конфигурации во время работы ассистента."""
         self.first_name_input.configure(state=state)
         self.last_name_input.configure(state=state)
         self.resume_input.configure(state=state)
@@ -1509,21 +1829,19 @@ class JobHunterApp(ctk.CTk):
         self.location_entry.configure(state=state)
 
     def _set_show_local_warning_async(self, value):
-        """Асинхронно сохраняет флаг предупреждения о локальных LLM без блокировки UI."""
         def _bg():
             try:
                 jh_storage_manager.set_show_local_warning(value)
             except Exception as e:
-                print(f"[Config]: Не удалось сохранить флаг предупреждения: {e}")
+                print(f"[Config]: {e}")
         threading.Thread(target=_bg, daemon=True).start()
 
+    # ── Toggle (Start / Stop) ─────────────────────────────────────────────────
+
     def toggle_assistant(self):
-        """Включает/выключает прием вебхуков и работу ИИ."""
+        """Starts or stops the AI processing queue."""
         if not self.is_active:
-            # app_config актуален: обновляется при save_and_close() настроек
-            # и при process_incoming_vacancy() в фоне.
-            # Повторное load_config() с диска здесь избыточно и блокирует GUI.
-            provider = self.app_config.get("current_provider", "Gemini")
+            provider   = self.app_config.get("current_provider", "Gemini")
             model_pool = self.app_config.get("active_models", {}).get(provider, [])
             first_name = self.first_name_input.get().strip()
 
@@ -1554,20 +1872,15 @@ class JobHunterApp(ctk.CTk):
                     return
 
             if not first_name:
-                messagebox.showerror(
-                    tr("err_start_title"),
-                    tr("err_name_msg"),
-                    parent=self
-                )
+                messagebox.showerror(tr("err_start_title"), tr("err_name_msg"), parent=self)
                 return
 
             was_paused = self._paused_mode
             self._paused_mode = False
             if not was_paused:
-                # Reset session counters only on a fresh start (not resume)
                 self._session_processed = 0
-                self._session_approved = 0
-                self._session_rejected = 0
+                self._session_approved  = 0
+                self._session_rejected  = 0
 
             self.save_current_config()
             self.set_inputs_state("disabled")
@@ -1584,25 +1897,20 @@ class JobHunterApp(ctk.CTk):
             self.worker_thread = threading.Thread(target=self.queue_worker_loop, daemon=True)
             self.worker_thread.start()
 
-            if not self.server_started:
-                self.server_started = True
-                self._flask_ready.clear()  # reset in case of restart
-                self.flask_thread = threading.Thread(target=self.run_flask_server, daemon=True)
-                self.flask_thread.start()
-                # Flask needs time to kill zombie processes (netstat + taskkill) and bind.
-                # Keep is_active=False and show "starting" until _flask_ready is set.
-                # This prevents ERR_CONNECTION_REFUSED during the startup window.
-                self.btn_toggle.configure(text=tr("btn_starting"), state="disabled",
-                                          fg_color=COLOR_GOLD, hover_color=COLOR_GOLD_HOVER,
-                                          text_color=COLOR_BG_DARK)
-                self.status_lbl.configure(text=tr("status_starting"), text_color=COLOR_GOLD)
-                self.after(100, lambda: self._activate_when_ready(0))
-            else:
-                # Flask is already running (stop → start cycle or resume).
-                self.is_active = True
-                self.btn_toggle.configure(text=tr("btn_stop"), fg_color=COLOR_RED,
-                                          hover_color=COLOR_RED_HOVER, text_color=COLOR_TEXT_LIGHT)
-                self.status_lbl.configure(text=tr("status_active"), text_color=COLOR_CYAN_NEON)
+            self.is_active = True
+            self.btn_toggle.configure(
+                text=tr("btn_stop"), fg_color=COLOR_RED,
+                hover_color=COLOR_RED_HOVER, text_color=COLOR_TEXT_LIGHT, state="normal"
+            )
+            try:
+                from jh_automation import HotkeySpec
+                _hk_display = HotkeySpec.from_config(self.app_config).display()
+            except Exception:
+                _hk_display = "Ctrl + Shift + X"
+            self.status_lbl.configure(
+                text=tr("status_active", hotkey=_hk_display), text_color=COLOR_CYAN_NEON
+            )
+
         else:
             self.is_active = False
             self.stop_worker_event.set()
@@ -1610,127 +1918,42 @@ class JobHunterApp(ctk.CTk):
             self._show_normal_toggle()
             self.status_lbl.configure(text=tr("status_stopped"), text_color=COLOR_RED)
 
-            # _worker_has_item is True while the worker holds a dequeued item.
-            # It sets the flag to False before returning (restoring item to queue).
-            # We check both queue size and the flag to get the true pending count.
             q_size = self.vacancy_queue.qsize() + (1 if self._worker_has_item else 0)
             if q_size > 0:
                 self._show_paused_toggle(q_size)
                 self.status_lbl.configure(text=tr("status_paused", q=q_size), text_color=COLOR_GOLD)
 
-    def kill_process_on_port(self, port):
-        """Принудительно завершает процесс, занимающий указанный порт (работает на Windows)."""
-        try:
-            import subprocess
-            import os
-            cmd = f'netstat -ano | findstr :{port}'
-            output = subprocess.check_output(cmd, shell=True).decode('utf-8', errors='ignore')
-            pids = set()
-            for line in output.splitlines():
-                parts = line.strip().split()
-                if len(parts) >= 5 and f":{port}" in parts[1]:
-                    pid = parts[-1]
-                    if pid.isdigit() and int(pid) != os.getpid():
-                        pids.add(int(pid))
-            for pid in pids:
-                print(f"[Система]: Обнаружен зомби-процесс {pid} на порту {port}. Принудительно завершаем...")
-                subprocess.run(f'taskkill /F /PID {pid}', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception as e:
-            print(f"[Система]: Не удалось очистить порт {port}: {e}")
-
-    def run_flask_server(self):
-        """
-        Запускает Flask через werkzeug make_server в управляемом режиме.
-        Хранит дескриптор сервера (self.flask_server), что позволяет позже
-        корректно завершить его (shutdown) и не плодить висящие потоки/сокеты.
-        """
-        port = 5000
-        self.kill_process_on_port(port)
-        try:
-            # make_server даёт объект сервера, которым можно управлять,
-            # в отличие от flask_app.run(), который блокирует поток без выхода.
-            from werkzeug.serving import make_server
-            self.flask_server = make_server("127.0.0.1", port, flask_app, threaded=True)
-            # Socket is bound and listening — safe to accept connections.
-            self._flask_ready.set()
-            print(f"[Flask]: Сервер запущен на 127.0.0.1:{port}")
-            # serve_forever блокирует ЭТОТ поток до вызова shutdown().
-            self.flask_server.serve_forever()
-            print("[Flask]: Сервер штатно остановлен.")
-        except OSError as e:
-            print(f"[Flask Ошибка]: Не удалось привязать сокет к порту {port}: {e}")
-            self.update_status(tr("status_server_fail", port=port), COLOR_RED)
-            self.server_started = False
-        except Exception as e:
-            print(f"[Flask Ошибка]: Непредвиденный сбой веб-сервера ({type(e).__name__}): {e}")
-            self.server_started = False
-
-    def shutdown_flask_server(self):
-        """Корректно останавливает werkzeug-сервер и дожидается завершения потока."""
-        server = self.flask_server
-        if server is not None:
-            try:
-                server.shutdown()      # разблокирует serve_forever
-            except Exception as e:
-                print(f"[Flask]: Ошибка при остановке сервера: {e}")
-            try:
-                server.server_close()  # закрывает слушающий сокет
-            except Exception as e:
-                print(f"[Flask]: Ошибка при закрытии сокета: {e}")
-            self.flask_server = None
-        thread = self.flask_thread
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=2.0)
-        self.flask_thread = None
-        self.server_started = False
+    # ── Thread safety helpers ─────────────────────────────────────────────────
 
     def update_status(self, text, color):
-        """Безопасное обновление статуса на главном экране из фоновых потоков."""
-        try:
-            if self.winfo_exists():
-                self.after(0, lambda: self.status_lbl.configure(text=text, text_color=color))
-        except Exception as e:
-            print(f"[Thread Status Error]: {e}")
+        """
+        Thread-safe status label update.
 
-    def _activate_when_ready(self, attempt):
-        """Checks _flask_ready Event (set by run_flask_server after make_server binds).
-        Non-blocking: threading.Event.is_set() returns instantly, no I/O on main thread."""
-        if self.is_active:
-            return
-        if self._flask_ready.is_set():
-            self.is_active = True
-            self.btn_toggle.configure(text=tr("btn_stop"), state="normal",
-                                      fg_color=COLOR_RED, hover_color=COLOR_RED_HOVER,
-                                      text_color=COLOR_TEXT_LIGHT)
-            self.status_lbl.configure(text=tr("status_active"), text_color=COLOR_CYAN_NEON)
-        elif attempt < 60:  # wait up to 6 seconds (60 × 100ms)
-            self.after(100, lambda a=attempt: self._activate_when_ready(a + 1))
-        else:
-            # Flask never came up — restore Start button
-            self.is_active = False
-            self.server_started = False
-            self.set_inputs_state("normal")
-            self._show_normal_toggle()
-            self.status_lbl.configure(text=tr("status_server_fail", port=5000), text_color=COLOR_RED)
+        Uses self._alive rather than winfo_exists() as the guard: winfo_exists()
+        is a Tkinter call that must only run on the main thread, but update_status
+        is called from background worker threads.  self.after() is the one Tkinter
+        method explicitly documented as safe to call from any thread; _alive gates
+        the call so we don't schedule callbacks into a destroyed root window.
+        """
+        if self._alive.is_set():
+            try:
+                self.after(0, lambda: self.status_lbl.configure(text=text, text_color=color))
+            except Exception as e:
+                print(f"[Status]: {e}")
 
     def _safe_after(self, ms, callback):
-        """
-        Потокобезопасная обёртка над after(): проверяет существование окна
-        перед постановкой коллбэка в Tcl-очередь.
-        Используется из фоновых потоков вместо прямого self.after().
-        """
-        try:
-            if self.winfo_exists():
+        if self._alive.is_set():
+            try:
                 self.after(ms, callback)
-        except Exception:
-            pass
+            except Exception:
+                pass
+
+    # ── Vacancy queue ─────────────────────────────────────────────────────────
 
     def enqueue_vacancy(self, data):
         """
-        Добавляет вакансию в очередь. Намеренно без локов — queue.Queue.put()
-        потокобезопасен сам по себе. O(1) проверка дублей через _url_lock
-        (удерживается микросекунды, никакого I/O). Финальная проверка дублей
-        выполняется воркером перед обработкой — ловит редкие гонки.
+        Enqueues an incoming vacancy dict. Performs O(1) dedup via in-memory URL sets.
+        Called from the automation daemon thread — queue.Queue.put() is thread-safe.
         """
         url = data.get("url", "")
         if url and url != "#":
@@ -1744,120 +1967,147 @@ class JobHunterApp(ctk.CTk):
         self.update_status(tr("status_queue_added", q=q_size), COLOR_GOLD)
 
     def queue_worker_loop(self):
-        """Фоновый цикл обработки очереди с динамической задержкой из настроек."""
+        """Background loop: pulls vacancies from queue and processes them."""
         while not self.stop_worker_event.is_set():
             try:
                 vacancy_data = self.vacancy_queue.get(timeout=0.5)
             except queue.Empty:
                 continue
 
-            self._worker_has_item = True
-            delay_seconds = self.app_config.get("request_delay", 15)
+            try:
+                self._worker_has_item = True
 
-            if delay_seconds == 0:
-                # No countdown — but still show queue status and check stop event
-                current_q_size = self.vacancy_queue.qsize() + 1
-                self.update_status(
-                    tr("status_queue", sec=0, q=current_q_size, done=self._session_processed),
-                    COLOR_GOLD
-                )
-                if self.stop_worker_event.is_set():
-                    self.vacancy_queue.put(vacancy_data)
-                    self._worker_has_item = False
-                    return
-            else:
-                for remaining in range(delay_seconds, 0, -1):
-                    current_q_size = self.vacancy_queue.qsize() + 1
-                    self.update_status(
-                        tr("status_queue", sec=remaining, q=current_q_size, done=self._session_processed),
-                        COLOR_GOLD
+                # Failure sentinel pushed by BrowserCaptureEngine when the capture
+                # pipeline aborts after notify_fn() fires.  Reset the UI immediately
+                # without going through the delay countdown, then discard the item.
+                if vacancy_data.get("status") == "failed":
+                    error = vacancy_data.get("error", "capture_error")
+                    self._safe_after(
+                        0,
+                        lambda e=error: self.update_status(
+                            tr("status_proc_error", msg=e), COLOR_RED
+                        ),
                     )
-                    # Проверяем stop каждые 200 мс — при остановке возвращаем элемент в очередь
-                    # до того, как главный поток посчитает её размер.
-                    for _ in range(5):
-                        if self.stop_worker_event.is_set():
-                            self.vacancy_queue.put(vacancy_data)
-                            self._worker_has_item = False
-                            return
-                        time.sleep(0.2)
-
-            if not self.stop_worker_event.is_set():
-                # Worker-side dedup: catches the rare race where two concurrent
-                # Flask threads both passed the enqueue_vacancy check before
-                # either vacancy was saved. O(1), no I/O.
-                url = vacancy_data.get("url", "")
-                if url and url != "#" and (
-                    jh_storage_manager.vacancy_url_in_approved(url) or
-                    jh_storage_manager.vacancy_url_in_rejected(url)
-                ):
-                    self.vacancy_queue.task_done()
-                    self._worker_has_item = False
+                    try:
+                        self.vacancy_queue.task_done()
+                    except Exception:
+                        pass
                     continue
 
-                self.process_incoming_vacancy(vacancy_data)
-                self.vacancy_queue.task_done()
+                delay_seconds = self.app_config.get("request_delay", 15)
 
-                # Debounced "queue done" notification: fires only if no new vacancy arrives within 2s.
-                # _batch_id is incremented by enqueue_vacancy; the closure captures current value
-                # and compares at fire time — if mismatch, a newer batch is in progress.
-                if self.vacancy_queue.empty():
-                    captured_batch = self._batch_id
-                    def _deferred_notif(batch=captured_batch):
-                        if (self._batch_id == batch
-                                and self.vacancy_queue.empty()
-                                and not self._worker_has_item
-                                and self.is_active
-                                and self.app_config.get("notifications_enabled", True)):
-                            try:
-                                import jh_notifications
-                                jh_notifications.send_notification(
-                                    "Job Hunter AI",
-                                    tr("notif_queue_done",
-                                       approved=self._session_approved,
-                                       rejected=self._session_rejected),
-                                    root=self
-                                )
-                            except Exception:
-                                pass
-                    # _safe_after проверяет существование окна перед after() из фонового потока
-                    self._safe_after(2000, _deferred_notif)
-            self._worker_has_item = False
+                if delay_seconds == 0:
+                    current_q = self.vacancy_queue.qsize() + 1
+                    self.update_status(
+                        tr("status_queue", sec=0, q=current_q, done=self._session_processed),
+                        COLOR_GOLD
+                    )
+                    if self.stop_worker_event.is_set():
+                        self.vacancy_queue.put(vacancy_data)
+                        return
+                else:
+                    for remaining in range(delay_seconds, 0, -1):
+                        current_q = self.vacancy_queue.qsize() + 1
+                        self.update_status(
+                            tr("status_queue", sec=remaining, q=current_q, done=self._session_processed),
+                            COLOR_GOLD
+                        )
+                        for _ in range(5):
+                            if self.stop_worker_event.is_set():
+                                self.vacancy_queue.put(vacancy_data)
+                                return
+                            time.sleep(0.2)
+
+                if not self.stop_worker_event.is_set():
+                    url = vacancy_data.get("url", "")
+                    if url and url != "#" and (
+                        jh_storage_manager.vacancy_url_in_approved(url) or
+                        jh_storage_manager.vacancy_url_in_rejected(url)
+                    ):
+                        self.update_status(tr("status_duplicate_db"), COLOR_TEXT_MUTED)
+                        try:
+                            self.vacancy_queue.task_done()
+                        except Exception:
+                            pass
+                        continue
+
+                    self.process_incoming_vacancy(vacancy_data)
+                    try:
+                        self.vacancy_queue.task_done()
+                    except Exception:
+                        pass
+
+                    if self.vacancy_queue.empty():
+                        captured_batch = self._batch_id
+                        def _deferred_notif(batch=captured_batch):
+                            if (self._batch_id == batch
+                                    and self.vacancy_queue.empty()
+                                    and not self._worker_has_item
+                                    and self.is_active
+                                    and self.app_config.get("notifications_enabled", True)):
+                                try:
+                                    import jh_notifications
+                                    jh_notifications.send_notification(
+                                        "Job Hunter AI",
+                                        tr("notif_queue_done",
+                                           approved=self._session_approved,
+                                           rejected=self._session_rejected),
+                                        root=self,
+                                        on_click=self._bring_to_front,
+                                    )
+                                except Exception:
+                                    pass
+                        self._safe_after(2000, _deferred_notif)
+
+            except Exception as exc:
+                import traceback
+                print(f"[Worker]: Unhandled error processing vacancy: {exc}")
+                traceback.print_exc()
+                try:
+                    self.vacancy_queue.task_done()
+                except Exception:
+                    pass
+
+            finally:
+                self._worker_has_item = False
 
     def process_incoming_vacancy(self, vacancy_data):
-        """Обработка одной вакансии через ИИ-движок"""
+        """Sends one vacancy through the AI engine and persists the result."""
         self.update_status(tr("status_analyzing"), COLOR_GOLD)
         self.app_config = jh_storage_manager.load_config()
         jh_i18n.set_language(self.app_config.get("language", "en"))
 
         try:
-            status, result_text, extracted_info = jh_ai_engine.analyze_and_generate(vacancy_data, self.app_config)
-            
-            company = extracted_info.get("company", vacancy_data.get("company", "Не указана"))
-            title = extracted_info.get("title", vacancy_data.get("title", "Не указано"))
-            url = vacancy_data.get("url", "#")
+            status, result_text, extracted_info = jh_ai_engine.analyze_and_generate(
+                vacancy_data, self.app_config,
+                cancel_event=self.stop_worker_event,
+            )
+            company     = extracted_info.get("company", vacancy_data.get("company", "Unknown"))
+            title       = extracted_info.get("title",   vacancy_data.get("title",   "Unknown"))
+            url         = vacancy_data.get("url", "#")
             description = vacancy_data.get("text", "")
 
             if status == "APPROVED":
                 jh_storage_manager.save_approved_vacancy(
-                    company=company,
-                    title=title,
-                    url=url,
-                    cover_letter=result_text,
-                    description=description
+                    company=company, title=title, url=url,
+                    cover_letter=result_text, description=description
                 )
-                self._session_approved += 1
+                self._session_approved  += 1
                 self._session_processed += 1
                 self.update_status(tr("status_approved", title=title, company=company), COLOR_CYAN_NEON)
             elif status == "REJECTED":
                 jh_storage_manager.save_rejected_vacancy(
-                    company=company,
-                    title=title,
-                    url=url,
-                    reason=result_text
+                    company=company, title=title, url=url, reason=result_text
                 )
-                self._session_rejected += 1
+                self._session_rejected  += 1
                 self._session_processed += 1
                 self.update_status(tr("status_rejected", title=title, company=company), COLOR_RED)
+            elif result_text == "cancelled":
+                # Vacancy was cancelled between Stage 1 and Stage 2 by stop_worker_event.
+                # Re-queue it so it is processed when the user resumes, then return
+                # without incrementing processed counters or showing an error.
+                self.vacancy_queue.put(vacancy_data)
+                return
             else:
                 self.update_status(tr("status_error", msg=result_text), COLOR_RED)
         except Exception as e:
@@ -1865,20 +2115,19 @@ class JobHunterApp(ctk.CTk):
             if self.app_config.get("notifications_enabled", True):
                 try:
                     import jh_notifications
-                    jh_notifications.send_notification("Job Hunter AI", tr("notif_error_body"), root=self)
+                    jh_notifications.send_notification("Job Hunter AI", tr("notif_error_body"), root=self, on_click=self._bring_to_front)
                 except Exception:
                     pass
 
+    # ── PDF import ────────────────────────────────────────────────────────────
+
     def import_resume_from_pdf(self):
-        """Парсит PDF резюме, дистиллирует через ИИ и вставляет результат в поле опыта."""
         filepath = filedialog.askopenfilename(
-            parent=self,
-            title=tr("btn_pdf_import"),
+            parent=self, title=tr("btn_pdf_import"),
             filetypes=[("PDF files", "*.pdf")]
         )
         if not filepath:
             return
-
         self.update_status(tr("pdf_processing"), COLOR_GOLD)
         self.btn_pdf_import.configure(state="disabled")
 
@@ -1891,30 +2140,20 @@ class JobHunterApp(ctk.CTk):
                     self.after(0, lambda: self.update_status(tr("pdf_error_damaged"), COLOR_RED))
                     self.after(0, lambda: self.btn_pdf_import.configure(state="normal"))
                     return
-
-                pages_text = []
-                for page in reader.pages:
-                    text = page.extract_text()
-                    if text:
-                        pages_text.append(text)
-                raw_text = "\n".join(pages_text).strip()
-
+                pages_text = [page.extract_text() for page in reader.pages if page.extract_text()]
+                raw_text   = "\n".join(pages_text).strip()
                 if not raw_text:
                     self.after(0, lambda: self.update_status(tr("pdf_error_no_text"), COLOR_RED))
                     self.after(0, lambda: self.btn_pdf_import.configure(state="normal"))
                     return
-
-                config = jh_storage_manager.load_config()
+                config   = jh_storage_manager.load_config()
                 distilled = jh_ai_engine.distill_resume(raw_text, config)
-
                 def _apply():
                     self.resume_input.delete("0.0", "end")
                     self.resume_input.insert("0.0", distilled.strip())
                     self.update_status(tr("status_loaded"), COLOR_CYAN_NEON)
                     self.btn_pdf_import.configure(state="normal")
-
                 self.after(0, _apply)
-
             except jh_ai_engine.AIEngineError as e:
                 msg = e.detail
                 self.after(0, lambda m=msg: self.update_status(tr("pdf_error_ai", msg=m), COLOR_RED))
@@ -1926,8 +2165,9 @@ class JobHunterApp(ctk.CTk):
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    # ── Resume history ────────────────────────────────────────────────────────
+
     def open_resume_history(self):
-        """Popup window for saving / loading / deleting named resumes."""
         hist_win = ctk.CTkToplevel(self)
         hist_win.withdraw()
         hist_win.title(tr("history_win_title"))
@@ -1939,96 +2179,57 @@ class JobHunterApp(ctk.CTk):
                 w.destroy()
             history = jh_storage_manager.get_resume_history()
             if not history:
-                ctk.CTkLabel(
-                    scroll_frame,
-                    text=tr("history_empty"),
-                    font=("Arial", 12),
-                    text_color=COLOR_TEXT_MUTED
-                ).pack(pady=20)
+                ctk.CTkLabel(scroll_frame, text=tr("history_empty"),
+                             font=("Arial", 12), text_color=COLOR_TEXT_MUTED).pack(pady=20)
                 return
             for item in history:
-                name = item.get("name", "")
-                text = item.get("text", "")
-                row = ctk.CTkFrame(scroll_frame, fg_color=COLOR_CARD_BG, corner_radius=6)
+                name = item.get("name", ""); text = item.get("text", "")
+                row  = ctk.CTkFrame(scroll_frame, fg_color=COLOR_CARD_BG, corner_radius=6)
                 row.pack(fill="x", padx=8, pady=3)
-                ctk.CTkLabel(
-                    row,
-                    text=name,
-                    font=("Arial", 12, "bold"),
-                    text_color=COLOR_TEXT_LIGHT,
-                    anchor="w"
-                ).pack(side="left", padx=12, pady=8, fill="x", expand=True)
+                ctk.CTkLabel(row, text=name, font=("Arial", 12, "bold"),
+                             text_color=COLOR_TEXT_LIGHT, anchor="w"
+                             ).pack(side="left", padx=12, pady=8, fill="x", expand=True)
 
                 def _load(t=text):
                     self.resume_input.delete("0.0", "end")
                     self.resume_input.insert("0.0", t)
                     hist_win.destroy()
 
-                ctk.CTkButton(
-                    row,
-                    text=tr("history_btn_load"),
-                    width=65,
-                    height=28,
-                    font=("Arial", 11, "bold"),
-                    fg_color=COLOR_CYAN_NEON,
-                    hover_color=COLOR_CYAN_HOVER,
-                    text_color=COLOR_BG_DARK,
-                    command=_load
-                ).pack(side="right", padx=(4, 4), pady=6)
+                ctk.CTkButton(row, text=tr("history_btn_load"), width=65, height=28,
+                              font=("Arial", 11, "bold"), fg_color=COLOR_CYAN_NEON,
+                              hover_color=COLOR_CYAN_HOVER, text_color=COLOR_BG_DARK,
+                              command=_load).pack(side="right", padx=(4, 4), pady=6)
 
                 def _delete(n=name, sf=scroll_frame):
                     jh_storage_manager.delete_resume_from_history(n)
                     _refresh(sf)
 
-                ctk.CTkButton(
-                    row,
-                    text=tr("history_btn_delete"),
-                    width=30,
-                    height=28,
-                    font=("Arial", 11, "bold"),
-                    fg_color=COLOR_RED,
-                    hover_color=COLOR_RED_HOVER,
-                    text_color=COLOR_TEXT_LIGHT,
-                    command=_delete
-                ).pack(side="right", padx=(0, 4), pady=6)
+                ctk.CTkButton(row, text=tr("history_btn_delete"), width=30, height=28,
+                              font=("Arial", 11, "bold"), fg_color=COLOR_RED,
+                              hover_color=COLOR_RED_HOVER, text_color=COLOR_TEXT_LIGHT,
+                              command=_delete).pack(side="right", padx=(0, 4), pady=6)
 
-        # Title with logo
         hist_header = ctk.CTkFrame(hist_win, fg_color="transparent")
         hist_header.pack(pady=(15, 8), padx=20)
         hist_logo = self.load_and_resize_logo(22)
         if hist_logo:
             ctk.CTkLabel(hist_header, image=hist_logo, text="").pack(side="left", padx=(0, 8))
-        ctk.CTkLabel(
-            hist_header,
-            text=tr("history_win_title"),
-            font=("Arial", 14, "bold"),
-            text_color=COLOR_CYAN_NEON
-        ).pack(side="left")
+        ctk.CTkLabel(hist_header, text=tr("history_win_title"),
+                     font=("Arial", 14, "bold"), text_color=COLOR_CYAN_NEON).pack(side="left")
 
-        # Scrollable list
-        scroll = ctk.CTkScrollableFrame(
-            hist_win,
-            fg_color=COLOR_BG_DARK,
-            height=240
-        )
+        scroll = ctk.CTkScrollableFrame(hist_win, fg_color=COLOR_BG_DARK, height=240)
         scroll.pack(fill="x", padx=12, pady=(0, 8))
         _refresh(scroll)
 
-        # Separator
         ctk.CTkFrame(hist_win, height=1, fg_color=COLOR_CARD_BG).pack(fill="x", padx=12, pady=4)
 
-        # Save section
         save_frame = ctk.CTkFrame(hist_win, fg_color="transparent")
         save_frame.pack(fill="x", padx=12, pady=(4, 15))
 
         name_entry = ctk.CTkEntry(
-            save_frame,
-            placeholder_text=tr("history_save_name_ph"),
-            height=34,
-            fg_color=COLOR_INPUT_BG,
-            border_color=COLOR_CARD_BG,
-            text_color=COLOR_TEXT_LIGHT,
-            placeholder_text_color=COLOR_TEXT_MUTED,
+            save_frame, placeholder_text=tr("history_save_name_ph"),
+            height=34, fg_color=COLOR_INPUT_BG, border_color=COLOR_CARD_BG,
+            text_color=COLOR_TEXT_LIGHT, placeholder_text_color=COLOR_TEXT_MUTED,
             font=("Arial", 11)
         )
         name_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
@@ -2039,13 +2240,10 @@ class JobHunterApp(ctk.CTk):
                 self.update_status(tr("history_name_empty"), COLOR_GOLD)
                 return
             current_text = self.resume_input.get("0.0", "end-1c").strip()
-            # Check overwrite
             existing = [r.get("name") for r in jh_storage_manager.get_resume_history()]
             if name in existing:
                 ok = messagebox.askyesno(
-                    tr("history_win_title"),
-                    tr("history_overwrite_q", name=name),
-                    parent=hist_win
+                    tr("history_win_title"), tr("history_overwrite_q", name=name), parent=hist_win
                 )
                 if not ok:
                     return
@@ -2053,22 +2251,18 @@ class JobHunterApp(ctk.CTk):
             _refresh(scroll)
             name_entry.delete(0, "end")
 
-        ctk.CTkButton(
-            save_frame,
-            text=tr("history_btn_save"),
-            height=34,
-            font=("Arial", 11, "bold"),
-            fg_color=COLOR_GOLD,
-            hover_color=COLOR_GOLD_HOVER,
-            text_color=COLOR_BG_DARK,
-            command=_save_current
-        ).pack(side="right")
+        ctk.CTkButton(save_frame, text=tr("history_btn_save"), height=34,
+                      font=("Arial", 11, "bold"), fg_color=COLOR_GOLD,
+                      hover_color=COLOR_GOLD_HOVER, text_color=COLOR_BG_DARK,
+                      command=_save_current).pack(side="right")
 
         def _show_hist():
-            if not hist_win.winfo_exists(): return
+            if not hist_win.winfo_exists():
+                return
             try:
                 hist_win.attributes("-alpha", 0.0)
-            except Exception: pass
+            except Exception:
+                pass
             try:
                 hist_win.update_idletasks()
                 w, h = 460, 420
@@ -2076,39 +2270,146 @@ class JobHunterApp(ctk.CTk):
                     sc = hist_win._get_window_scaling()
                 except Exception:
                     sc = 1.0
-                # w/h логические → физические для арифметики; x/y остаются физическими
-                child_phys_w, child_phys_h = w * sc, h * sc
-                px = self.winfo_rootx()
-                py = self.winfo_rooty()
-                pw = self.winfo_width()
-                ph = self.winfo_height()
-                x = int(px + (pw - child_phys_w) / 2)
-                y = int(py + (ph - child_phys_h) / 2)
-                hist_win.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
+                cpw, cph = w * sc, h * sc
+                px = self.winfo_rootx(); py = self.winfo_rooty()
+                pw = self.winfo_width(); ph = self.winfo_height()
+                x = int(px + (pw - cpw) / 2)
+                y = int(py + (ph - cph) / 2)
+                hist_win.geometry(f"{w}x{h}+{max(0,x)}+{max(0,y)}")
             except Exception:
                 hist_win.geometry("460x420")
-            hist_win.deiconify()
-            hist_win.grab_set()
-            hist_win.focus_force()
+            hist_win.deiconify(); hist_win.grab_set(); hist_win.focus_force()
             def _fin():
-                if not hist_win.winfo_exists(): return
+                if not hist_win.winfo_exists():
+                    return
                 try:
                     _apply_icon_win32(hist_win)
-                except Exception: pass
+                except Exception:
+                    pass
                 try:
                     hist_win.attributes("-alpha", 1.0)
-                except Exception: pass
+                except Exception:
+                    pass
                 hist_win.after(350, lambda: _apply_icon_win32(hist_win) if hist_win.winfo_exists() else None)
             hist_win.after(100, _fin)
         hist_win.after(120, _show_hist)
 
     def open_results(self):
-        """Открывает окно со списком одобренных ИИ вакансий"""
+        jh_results_ui.apply_theme(THEMES.get(self._active_theme, THEMES["Cyber-Owl"]))
         jh_results_ui.open_window(self)
+
+
+# =====================================================================
+# SINGLE-INSTANCE GUARD  +  WAKE-UP SIGNALLING
+# =====================================================================
+
+_WAKE_PORT = 57321  # loopback port used to signal the running instance
+
+
+def _signal_running_instance() -> None:
+    """Connect to the running instance's wake listener and ask it to restore."""
+    import socket as _socket
+    try:
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            s.connect(("127.0.0.1", _WAKE_PORT))
+            s.sendall(b"wake")
+    except Exception:
+        pass
+
+
+def _acquire_single_instance_lock():
+    """
+    Ensures only one instance of Job Hunter AI runs per user session.
+
+    Windows — Named mutex with "Local\\" prefix.  CreateMutexW returns a
+    handle even when the mutex already exists; GetLastError() == 183
+    (ERROR_ALREADY_EXISTS) indicates a duplicate.  Before exiting, the
+    second instance sends a wake signal over _WAKE_PORT so the running
+    instance restores itself from the tray.
+
+    Linux / macOS — Bind a loopback TCP socket on _WAKE_PORT.  OSError
+    on bind() means the port is already held by a running instance; we
+    connect to it and send the wake signal before exiting.
+
+    Must be called before any Tkinter or tray initialisation.
+    """
+    if sys.platform == "win32":
+        import ctypes
+        ERROR_ALREADY_EXISTS = 183
+        handle = ctypes.windll.kernel32.CreateMutexW(
+            None, False, "Local\\JobHunterAI_v3_SingleInstance"
+        )
+        if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            print("[SingleInstance]: Another instance is already running. Signalling it.")
+            _signal_running_instance()
+            os._exit(0)
+        return handle  # Keep alive — OS closes it when the process exits
+    else:
+        import socket as _socket
+        _sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        _sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 0)
+        try:
+            _sock.bind(("127.0.0.1", _WAKE_PORT))
+        except OSError:
+            print("[SingleInstance]: Another instance is already running. Signalling it.")
+            _signal_running_instance()
+            os._exit(0)
+        return _sock  # Keep reference alive; never .close()'d
+
+
+def _start_wake_listener(lock_obj, callback) -> None:
+    """
+    Starts a background thread that listens for wake signals from future
+    instances.  When a signal arrives, *callback* is invoked (on the
+    caller's thread — use app.after() to marshal onto the Tk thread).
+
+    On Windows lock_obj is a mutex handle, so we open a fresh server
+    socket on _WAKE_PORT.  On Linux/macOS lock_obj is the already-bound
+    socket; we just call listen() on it.
+    """
+    import socket as _socket
+
+    if sys.platform == "win32":
+        srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        srv.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        try:
+            srv.bind(("127.0.0.1", _WAKE_PORT))
+            srv.listen(1)
+        except OSError:
+            srv.close()
+            return
+    else:
+        srv = lock_obj
+        try:
+            srv.listen(1)
+        except Exception:
+            return
+
+    def _loop():
+        while True:
+            try:
+                conn, _ = srv.accept()
+                conn.close()
+                callback()
+            except Exception:
+                break
+
+    t = threading.Thread(target=_loop, daemon=True, name="WakeListener")
+    t.start()
+
 
 # =====================================================================
 # СТАРТ ПРИЛОЖЕНИЯ
 # =====================================================================
+# Module-level declaration ensures Python's GC never collects the lock
+# object before the process exits.  A socket stored only as a function-
+# local would be closed by __del__ the moment its frame is torn down,
+# releasing the bind and allowing a second instance to start.
+_SINGLE_INSTANCE_LOCK = None
+
 if __name__ == "__main__":
+    _SINGLE_INSTANCE_LOCK = _acquire_single_instance_lock()
     app = JobHunterApp()
+    _start_wake_listener(_SINGLE_INSTANCE_LOCK, lambda: app.after(0, app._bring_to_front))
     app.mainloop()

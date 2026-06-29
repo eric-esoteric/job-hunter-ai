@@ -550,6 +550,138 @@ def _is_local_provider(provider_name):
     return provider_name in ("Ollama", "LM Studio")
 
 
+# ── Vacancy keyword regex used by extract_relevant_context ────────────────────
+# Matches structural section headers in both Russian and English that reliably
+# identify the substantive body of a job posting.
+_VACANCY_KW_RE = re.compile(
+    r"("
+    # Russian section headers (stem-matched to cover inflections)
+    r"обязанност|требовани|условия|задачи|функции|навыки|технолог|стек"
+    r"|предлагаем|о нас|о компании|зарплата|вилка|оплата"
+    # English section headers
+    r"|responsibilities|requirements|qualifications|duties"
+    r"|we\s+offer|benefits|about\s+us|about\s+the\s+role"
+    r"|tech\s+stack|skills|experience|salary|compensation"
+    r"|who\s+we\s+are|what\s+you.ll\s+do|what\s+you.ll\s+bring"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def pack_paragraphs_to_budget(
+    paragraphs: list[str],
+    max_chars: int,
+    delimiter: str = "\n\n",
+) -> str:
+    """
+    Packs paragraphs into a strict character budget with mathematical precision.
+
+    Preconditions:  paragraphs is a list[str]; max_chars > 0; delimiter is str.
+    Postcondition:  len(result) <= max_chars  (hard invariant).
+
+    Budget math for each candidate paragraph p:
+        required_space = len(p)                          if buffer is empty
+        required_space = len(p) + len(delimiter)         otherwise
+    A paragraph that cannot fit is skipped; scanning continues so that smaller
+    paragraphs later in the list can still be included.
+    """
+    if not paragraphs:
+        return ""
+
+    packed_chunks: list[str] = []
+    current_total_len = 0
+    glue_len = len(delimiter)
+
+    for p in paragraphs:
+        p_len = len(p)
+        required_space = p_len + (glue_len if packed_chunks else 0)
+        if current_total_len + required_space <= max_chars:
+            packed_chunks.append(p)
+            current_total_len += required_space
+        else:
+            continue  # enforce boundary contract strictly
+
+    return delimiter.join(packed_chunks)
+
+
+def extract_relevant_context(raw_text: str, max_chars: int) -> str:
+    """
+    Filters job vacancy text by relevance while strictly preserving the original
+    paragraph sequence to maintain semantic coherence for the LLM.
+
+    Preconditions:  raw_text is a string; max_chars > 0.
+    Postcondition:  len(result) <= max_chars  (enforced by pack_paragraphs_to_budget).
+
+    Pipeline:
+      1. Normalize whitespace; collapse blank-line runs to two newlines.
+      2. Drop navigation / UI noise lines (≤2 words AND ≤25 chars that do NOT
+         contain a structural vacancy keyword from _VACANCY_KW_RE).
+      3. Split remaining text into paragraph blocks (split on "\\n\\n").
+      4. Score each paragraph: keyword_hits + min(len / 600, 2.0).
+         Scoring uses the comprehensive Russian + English _VACANCY_KW_RE regex.
+      5. Sort by score descending; greedily select paragraphs within max_chars.
+         A paragraph that alone exceeds max_chars is skipped; the loop continues.
+      6. Re-sort the selected subset to original document order (Narrative Rule)
+         so the LLM reads chronologically coherent text, not a relevance shuffle.
+      7. Assemble via pack_paragraphs_to_budget for a hard len <= max_chars guarantee.
+    """
+    if not raw_text:
+        return ""
+
+    # Step 1: whitespace normalization
+    text = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # Step 2: drop navigation / UI noise lines
+    cleaned: list[str] = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            cleaned.append("")
+            continue
+        words = stripped.split()
+        # Short-line heuristic: ≤2 words AND ≤25 chars → likely a nav/button label.
+        # Exception: keep lines that contain a structural vacancy keyword
+        # (e.g. "Условия", "Requirements", "Skills" are 1-word but essential).
+        if len(words) <= 2 and len(stripped) <= 25:
+            if not _VACANCY_KW_RE.search(stripped):
+                continue
+        cleaned.append(line)
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned)).strip()
+
+    # Step 3: paragraph split (paragraph = block separated by double newline)
+    raw_paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+
+    # Step 4: score each paragraph, retaining its original positional index
+    def _score(para: str) -> float:
+        hits = len(_VACANCY_KW_RE.findall(para))
+        return hits + min(len(para) / 600.0, 2.0)
+
+    scored: list[tuple[int, str, float]] = [
+        (idx, para, _score(para))
+        for idx, para in enumerate(raw_paragraphs)
+    ]
+
+    # Step 5: sort descending by score; greedily select within budget
+    scored.sort(key=lambda x: x[2], reverse=True)
+    selected_items: list[tuple[int, str]] = []
+    current_len = 0
+    glue_len = len("\n\n")
+
+    for idx, para, _score_val in scored:
+        required_space = len(para) + (glue_len if selected_items else 0)
+        if current_len + required_space <= max_chars:
+            selected_items.append((idx, para))
+            current_len += required_space
+
+    # Step 6: Narrative Rule — restore original document order
+    selected_items.sort(key=lambda x: x[0])
+
+    # Step 7: pack with a hard budget guarantee
+    return pack_paragraphs_to_budget([p for _, p in selected_items], max_chars)
+
+
 def distill_resume(raw_text, config):
     """Однократная дистилляция сырого текста резюме через текущего провайдера ИИ."""
     provider_name = config.get("current_provider", "Gemini")
@@ -588,11 +720,17 @@ def distill_resume(raw_text, config):
     return provider.call_with_failover(raw_text[:8000], system_prompt)
 
 
-def analyze_and_generate(vacancy, config):
+def analyze_and_generate(vacancy, config, cancel_event=None):
     """
     Вызывает двухстадийный анализ вакансии через выбранного провайдера ИИ.
     stage1: фильтрация и извлечение структурированной информации в JSON.
     stage2: автогенерация качественного сопроводительного письма.
+
+    cancel_event: optional threading.Event — checked between Stage 1 and Stage 2.
+    When set, Stage 2 is skipped and ("ERROR", "cancelled", extracted_data) is
+    returned immediately.  Stage 1's in-flight HTTP request is NOT aborted (it
+    is bounded by request_timeout), but Stage 2 never starts — so pressing STOP
+    during Stage 1 takes at most one network timeout to take effect.
 
     Возвращает кортеж (status, text, extracted_data), где status ∈
     {"APPROVED", "REJECTED", "ERROR"}. При ошибке text — понятное
@@ -632,10 +770,16 @@ def analyze_and_generate(vacancy, config):
     language = config.get("language", "en")
     lang_name = "Russian" if language == "ru" else "English"
 
-    raw_title = vacancy.get('title', 'Не указано')
+    raw_title = (vacancy.get('title') or '').strip() or ('Unknown Position' if language == 'en' else 'Должность не указана')
     raw_text = vacancy.get('text', '')
     first_name = config.get("first_name", "Applicant")
     resume_text = config.get("resume", "")
+
+    # Score, select, and re-order paragraphs for each AI stage independently.
+    # pack_paragraphs_to_budget inside extract_relevant_context guarantees
+    # len(text) <= max_chars, preventing silent provider-side prompt truncation.
+    _cleaned_text_s1 = extract_relevant_context(raw_text, max_chars=12000)
+    _cleaned_text_s2 = extract_relevant_context(raw_text, max_chars=8000)
 
     # Stage 1 reject-reason text for app-generated filter decisions
     _REJECT = {
@@ -658,12 +802,37 @@ def analyze_and_generate(vacancy, config):
     def _reason(key):
         return _REJECT[key].get(language, _REJECT[key]["en"])
 
+    _GEO_ALIASES = {
+        # English abbreviations
+        "us": "united states", "usa": "united states", "u.s.": "united states",
+        "u.s.a.": "united states", "america": "united states",
+        "uk": "united kingdom", "u.k.": "united kingdom", "gb": "united kingdom",
+        "great britain": "united kingdom", "britain": "united kingdom",
+        "uae": "united arab emirates",
+        "ksa": "saudi arabia",
+        # Russian-language user input
+        "сша": "united states", "великобритания": "united kingdom",
+        "рф": "russia", "россия": "russia", "российская федерация": "russia",
+        "беларусь": "belarus", "украина": "ukraine",
+        "германия": "germany", "австрия": "austria", "швейцария": "switzerland",
+        "польша": "poland", "чехия": "czech republic", "словакия": "slovakia",
+        "нидерланды": "netherlands", "голландия": "netherlands",
+        "испания": "spain", "франция": "france", "италия": "italy",
+        "швеция": "sweden", "норвегия": "norway", "дания": "denmark",
+        "финляндия": "finland", "канада": "canada", "австралия": "australia",
+        "малайзия": "malaysia", "вьетнам": "vietnam", "япония": "japan",
+        "китай": "china", "индия": "india",
+    }
+
+    def _normalize_geo(name: str) -> str:
+        n = name.lower().strip()
+        return _GEO_ALIASES.get(n, n)
+
     def _geo_match(user_loc: str, regions: list) -> bool:
-        """Case-insensitive substring match of user location against a list of regions."""
-        u = user_loc.lower().strip()
+        u = _normalize_geo(user_loc)
         for r in regions:
-            r_l = str(r).lower().strip()
-            if u and r_l and (u in r_l or r_l in u):
+            r_n = _normalize_geo(str(r))
+            if u and r_n and (u in r_n or r_n in u):
                 return True
         return False
 
@@ -737,20 +906,95 @@ def analyze_and_generate(vacancy, config):
     _s1_bias_strict = (
         "=== EVALUATION MODE: STRICT ===\n"
         "Quality over quantity — filter aggressively.\n"
-        "Reject if ANY hard criterion (1–3) is met, OR if TWO OR MORE soft red flags from criterion 4 are present.\n"
-        "Do NOT give benefit of the doubt on ambiguous quality signals. WHEN IN DOUBT → REJECT.\n\n"
+        "Reject if ANY hard criterion (1–3) is met, OR if TWO OR MORE soft red flags from criterion 4 are present,\n"
+        "OR if criterion 5 applies (when included).\n"
+        "Do NOT give benefit of the doubt on ambiguous quality signals. WHEN IN DOUBT → REJECT.\n"
+        "Exception: criterion 5 carries its own doubt rule — see that section.\n\n"
+    )
+    _s1_stack_seniority = (
+        "=== REJECTION CRITERION 5: PROFESSIONAL DOMAIN AND SENIORITY MISMATCH ===\n"
+        "Active only in strict mode when a candidate resume with real work experience is provided.\n"
+        "Two independent sub-checks — either alone is sufficient to reject.\n\n"
+
+        "— PART A: CORE PROFESSIONAL DOMAIN INCOMPATIBILITY —\n"
+        "Purpose: catch vacancies whose required expertise is fundamentally outside the candidate's\n"
+        "professional background — not merely a different specialisation within the same field.\n\n"
+        "PROCESS:\n"
+        "  1. From the resume, identify the candidate's PRIMARY professional function\n"
+        "     (e.g. sales, software development, marketing, accounting, design, HR, logistics, medicine)\n"
+        "     and their SPECIFIC DOMAIN within it\n"
+        "     (e.g. B2C furniture retail, Python backend, digital marketing, tax accounting).\n"
+        "  2. Identify the PRIMARY competency the vacancy requires.\n"
+        "  3. Reject ONLY if the required competency is FUNDAMENTALLY different from the candidate's\n"
+        "     background AND the candidate's resume contains no bridge experience that could qualify them.\n\n"
+        "REJECT — clear domain gaps (these are examples of the principle, not an exhaustive list):\n"
+        "  • Furniture showroom sales manager → enterprise B2B SaaS sales requiring SaaS-specific experience.\n"
+        "    (Retail B2C vs. enterprise software procurement: different expertise, different sales motion.)\n"
+        "  • Python developer → Java developer where Java is a hard non-negotiable requirement and not in resume.\n"
+        "    (Primary language absent; Python and Java are not directly transferable runtimes.)\n"
+        "  • Graphic designer → financial auditor. (Completely different professional functions.)\n"
+        "  • Marketing specialist → civil engineer. (No transferable domain expertise.)\n\n"
+        "PASS — related domains must never be rejected:\n"
+        "  • Kitchen furniture sales → wardrobe / bedroom / bathroom / home goods sales.\n"
+        "    (Same professional function, adjacent product domain — core skills transfer directly.)\n"
+        "  • B2C retail sales → B2B sales (when the vacancy does not require deep domain-specific expertise).\n"
+        "  • Python backend developer → FastAPI / Django / Flask / async Python vacancy.\n"
+        "    (Same language, same ecosystem — framework differences are not a domain gap.)\n"
+        "  • Java developer → Kotlin developer. (Same JVM ecosystem, highly transferable.)\n"
+        "  • Digital marketing specialist → SMM / PPC / content marketing / SEO.\n"
+        "    (Same function, different channel — core competency is the same.)\n"
+        "  • Accountant → bookkeeper / financial analyst / payroll specialist. (Adjacent finance roles.)\n"
+        "  • HR generalist → recruiter / talent acquisition. (Same HR function, narrower specialisation.)\n"
+        "  • Any vacancy in the same broad professional field where core skills clearly apply → PASS.\n\n"
+        "NEVER reject for mismatches on support tools regardless of profession:\n"
+        "databases (SQL, PostgreSQL, MySQL, MongoDB), cloud platforms (AWS, GCP, Azure),\n"
+        "DevOps / infra tools (Docker, Kubernetes, CI/CD, Git, Linux), project methodologies (Agile, Scrum, PMP).\n"
+        "These are supporting skills, not professional domains. Their absence is never a rejection reason.\n\n"
+        "ANY DOUBT about whether the domains are compatible → do NOT reject under Part A.\n"
+        "Err strongly on the side of the candidate. False positives cost real job opportunities.\n\n"
+
+        "— PART B: SENIORITY LEVEL MISMATCH —\n"
+        "Applies universally across all professions.\n"
+        "Reject if ALL THREE of the following are simultaneously true:\n"
+        "  1. The candidate is CLEARLY JUNIOR: 0–2 years of commercial experience\n"
+        "     AND no senior, lead, principal, or staff titles anywhere in the resume.\n"
+        "  2. The vacancy EXPLICITLY requires SENIOR, LEAD, PRINCIPAL, or STAFF level.\n"
+        "  3. The vacancy states a minimum required experience of 4 or more years.\n\n"
+        "Do NOT reject when:\n"
+        "  • The candidate is MIDDLE level (roughly 2–5 years of commercial experience).\n"
+        "    Middle candidates may freely apply to senior-labelled roles — do not block them.\n"
+        "  • The vacancy title says 'Senior' but the requirement body describes middle-level tasks or ≤3 years.\n"
+        "  • The required level is expressed as a range: 'Middle/Senior', 'Middle+', '3–6 years', etc.\n"
+        "  • The candidate's experience level is ambiguous or unclear in the resume.\n"
+        "    When in doubt about seniority → do NOT reject under Part B.\n\n"
+
+        "reject_reason for Part A: state which domain expertise is required and why the candidate's\n"
+        "background does not cover it (be specific — name the domain, not just 'mismatch').\n"
+        "reject_reason for Part B: state the required seniority level and the candidate's evident level.\n\n"
     )
 
     if strictness == 1:
         _s1_quality_block = _s1_profession + scams_block + _s1_bias_mild
     elif strictness == 3:
-        _s1_quality_block = _s1_profession + scams_block + _s1_exploitation + _s1_soft_flags + _s1_bias_strict
+        _stack_block = _s1_stack_seniority if resume_text.strip() else ""
+        _s1_quality_block = (
+            _s1_profession + scams_block + _s1_exploitation
+            + _s1_soft_flags + _stack_block + _s1_bias_strict
+        )
     else:  # 2 = BALANCED (default)
         _s1_quality_block = _s1_profession + scams_block + _s1_exploitation + _s1_bias_balanced
 
+    _dom_preamble = (
+        "=== INPUT FORMAT NOTE ===\n"
+        "The job posting text below was captured directly from a browser page via Ctrl+A / Ctrl+C.\n"
+        "It is raw DOM text and may contain navigation menus, cookie banners, footer links, "
+        "salary widgets, social share buttons, and other non-vacancy noise.\n"
+        "You MUST focus exclusively on the actual job description content and ignore all unrelated UI elements.\n\n"
+    )
+
     stage1_system_instruction = (
         "You are a precise senior job quality filter agent. Evaluate the job posting and return structured JSON.\n\n"
-        + _s1_quality_block +
+        + _dom_preamble + _s1_quality_block +
 
         "=== WORK FORMAT — return 'work_formats' as a JSON array ===\n"
         "List ALL formats explicitly offered or clearly implied in the vacancy.\n"
@@ -803,7 +1047,7 @@ def analyze_and_generate(vacancy, config):
         "}"
     )
     
-    stage1_prompt = f"Candidate Profile (Resume):\n{resume_text}\n\nJob Title: {raw_title}\n\nPage Text:\n{raw_text[:8000]}"
+    stage1_prompt = f"Candidate Profile (Resume):\n{resume_text}\n\nJob Title: {raw_title}\n\nRaw Page DOM Text (browser capture, pre-cleaned):\n{_cleaned_text_s1}"
 
     try:
         provider = get_provider(provider_name, api_key, model_pool, base_url)
@@ -881,6 +1125,12 @@ def analyze_and_generate(vacancy, config):
         print(f"[ИИ-Движок]: Непредвиденный сбой Stage 1 ({type(e).__name__}): {e}")
         return "ERROR", f"Непредвиденный сбой на Stage 1: {type(e).__name__}: {e}", {}
 
+    # Cancellation check: if STOP was pressed while Stage 1 was running, abort
+    # now rather than starting the more expensive Stage 2 generation call.
+    if cancel_event is not None and cancel_event.is_set():
+        print("[ИИ-Движок]: Cancelled between Stage 1 and Stage 2.")
+        return "ERROR", "cancelled", extracted_data
+
     # Запускаем Stage 2: генерация сопроводительного письма
     closing = "С уважением" if language == "ru" else "Best regards"
 
@@ -921,7 +1171,7 @@ def analyze_and_generate(vacancy, config):
         f"STRUCTURE AND LENGTH REQUIREMENT:\n{length_instruction}\n\n"
         f"At the very end of the letter, MANDATORILY add the closing signature: '{closing}, {first_name}'.{local_guard}"
     )
-    stage2_prompt = f"Resume:\n{resume_text}\n\nVacancy: {extracted_title} in company {extracted_company}\nDescription:\n{raw_text[:4000]}"
+    stage2_prompt = f"Resume:\n{resume_text}\n\nVacancy: {extracted_title} in company {extracted_company}\nDescription:\n{_cleaned_text_s2}"
 
     try:
         letter_text = provider.call_with_failover(stage2_prompt, stage2_system_instruction)

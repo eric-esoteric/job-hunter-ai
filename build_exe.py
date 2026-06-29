@@ -264,7 +264,11 @@ def install_and_compile():
     print("\n[1/4] Проверка и установка необходимых утилит для сборки...")
     # Гарантируем, что PyInstaller установлен
     subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], check=True)
-    subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller", "customtkinter", "flask", "flask_cors", "pillow"], check=True)
+    subprocess.run([
+        sys.executable, "-m", "pip", "install", "--upgrade",
+        "pyinstaller", "customtkinter", "pillow", "plyer",
+        "pynput", "pystray", "pyperclip", "pypdf"
+    ], check=True)
 
     print("\n[2/4] Определение путей CustomTkinter...")
     try:
@@ -278,7 +282,7 @@ def install_and_compile():
     # Точка входа в структурированной папке src/
     main_script = os.path.join("src", "main_app.py")
     icon_file = "icon.ico"
-    logo_file = "logo.png"
+    logo_file = os.path.join("assets", "logo.png")
 
     if not os.path.exists(main_script):
         print(f"[Ошибка]: Главный файл {main_script} не найден в директории проекта ({script_dir})!")
@@ -316,6 +320,17 @@ def install_and_compile():
         cmd.append(f"--version-file={version_file_path}")
     else:
         print("[Предупреждение]: version_info.txt не сгенерирован — версия в свойствах .exe будет отсутствовать.")
+
+    # Hidden-imports required by pynput and pystray (not auto-detected by PyInstaller)
+    cmd += [
+        "--hidden-import=pynput.keyboard",
+        "--hidden-import=pynput.mouse",
+        "--hidden-import=pynput._util.win32",
+        "--hidden-import=pystray",
+        "--hidden-import=pystray._win32",
+        "--hidden-import=pyperclip",
+        "--collect-submodules=pynput",
+    ]
 
     # Добавляем целевой скрипт в сборку
     cmd.append(main_script)

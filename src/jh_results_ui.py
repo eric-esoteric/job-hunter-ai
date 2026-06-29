@@ -10,9 +10,25 @@ from tkinter import messagebox
 
 from PIL import Image
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ICON_PATH = os.path.join(BASE_DIR, "icon.ico")
-LOGO_PNG_PATH = os.path.join(BASE_DIR, "logo.png")
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
+_ROOT_DIR = os.path.dirname(BASE_DIR)
+
+
+def _find_asset(name: str) -> str:
+    for candidate in (
+        os.path.join(BASE_DIR, name),
+        os.path.join(_ROOT_DIR, name),
+        os.path.join(_ROOT_DIR, "assets", name),
+        os.path.join(os.path.dirname(sys.executable), name),
+        os.path.join(getattr(sys, "_MEIPASS", ""), name),
+    ):
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return os.path.join(BASE_DIR, name)
+
+
+ICON_PATH     = _find_asset("icon.ico")
+LOGO_PNG_PATH = _find_asset("logo.png")
 
 
 def _load_logo_image(height_px=22):
@@ -39,6 +55,31 @@ COLOR_RED = "#D24B4B"           # Приглушенный красный (оп�
 COLOR_RED_HOVER = "#A83C3C"     # Глубокий вишневый (hover)
 COLOR_TEXT_MUTED = "#828D9A"     # Пыльно-серый текст
 COLOR_TEXT_LIGHT = "#E9EDF0"     # Комфортный белый звездный текст
+
+CORNER_RADIUS = 8
+
+
+def apply_theme(theme_dict: dict) -> None:
+    """Sync module-level color constants from the active theme dict."""
+    global COLOR_BG_DARK, COLOR_CARD_BG, COLOR_INPUT_BG
+    global COLOR_CYAN_NEON, COLOR_CYAN_HOVER
+    global COLOR_GOLD, COLOR_GOLD_HOVER
+    global COLOR_RED, COLOR_RED_HOVER
+    global COLOR_TEXT_MUTED, COLOR_TEXT_LIGHT
+    global CORNER_RADIUS
+    COLOR_BG_DARK    = theme_dict.get("bg",           COLOR_BG_DARK)
+    COLOR_CARD_BG    = theme_dict.get("card_bg",       COLOR_CARD_BG)
+    COLOR_INPUT_BG   = theme_dict.get("input_bg",      COLOR_INPUT_BG)
+    COLOR_CYAN_NEON  = theme_dict.get("accent",        COLOR_CYAN_NEON)
+    COLOR_CYAN_HOVER = theme_dict.get("accent_hover",  COLOR_CYAN_HOVER)
+    COLOR_GOLD       = theme_dict.get("gold",          COLOR_GOLD)
+    COLOR_GOLD_HOVER = theme_dict.get("gold_hover",    COLOR_GOLD_HOVER)
+    COLOR_RED        = theme_dict.get("danger",        COLOR_RED)
+    COLOR_RED_HOVER  = theme_dict.get("danger_hover",  COLOR_RED_HOVER)
+    COLOR_TEXT_MUTED = theme_dict.get("text_muted",    COLOR_TEXT_MUTED)
+    COLOR_TEXT_LIGHT = theme_dict.get("text",          COLOR_TEXT_LIGHT)
+    CORNER_RADIUS    = theme_dict.get("corner_radius", CORNER_RADIUS)
+
 
 def force_dark_title_bar(window):
     """Принудительно красит заголовок окна в темный цвет Windows"""
@@ -504,9 +545,11 @@ def open_window(parent_window):
         values=[tr("tab_approved", n=0), tr("tab_rejected", n=0)],
         font=("Arial", 11, "bold"),
         command=segment_changed,
-        selected_color=COLOR_GOLD,
-        selected_hover_color=COLOR_GOLD_HOVER,
-        text_color=COLOR_TEXT_LIGHT,
+        selected_color=COLOR_CYAN_NEON,
+        selected_hover_color=COLOR_CYAN_HOVER,
+        unselected_color=COLOR_CARD_BG,
+        unselected_hover_color=COLOR_INPUT_BG,
+        text_color=COLOR_BG_DARK,
         fg_color=COLOR_CARD_BG,
         height=32
     )
@@ -530,23 +573,29 @@ def open_window(parent_window):
         url = item.get("url", "#")
         cover_letter = item.get("cover_letter", "")
 
-        card = ctk.CTkFrame(parent_frame, fg_color=COLOR_CARD_BG, corner_radius=8, border_width=1, border_color=COLOR_INPUT_BG)
+        card = ctk.CTkFrame(parent_frame, fg_color=COLOR_CARD_BG, corner_radius=CORNER_RADIUS, border_width=1, border_color=COLOR_INPUT_BG)
         card.pack(pady=4, padx=5, fill="x")
+        card.columnconfigure(0, weight=1)
+        card.columnconfigure(1, weight=0)
 
         info_text = f"🏢 {company}\n💼 {title}"
         info_lbl = ctk.CTkLabel(
-            card, text=info_text, font=("Arial", 13, "bold"), 
-            anchor="w", justify="left", text_color=COLOR_TEXT_LIGHT, wraplength=340
+            card, text=info_text, font=("Arial", 13, "bold"),
+            anchor="w", justify="left", text_color=COLOR_TEXT_LIGHT, wraplength=200
         )
-        info_lbl.pack(side="left", padx=12, pady=8, fill="x", expand=True)
+        info_lbl.grid(row=0, column=0, sticky="ew", padx=12, pady=8)
+
+        def _on_info_configure(event, lbl=info_lbl):
+            lbl.configure(wraplength=max(40, event.width - 8))
+        info_lbl.bind("<Configure>", _on_info_configure)
 
         btn_frame = ctk.CTkFrame(card, fg_color="transparent")
-        btn_frame.pack(side="right", padx=10, pady=6)
+        btn_frame.grid(row=0, column=1, sticky="e", padx=10, pady=6)
 
         btn_letter = ctk.CTkButton(
             btn_frame, text=tr("btn_letter"), width=85, height=32,
             fg_color=COLOR_CARD_BG, hover_color=COLOR_INPUT_BG,
-            text_color=COLOR_TEXT_MUTED,
+            text_color=COLOR_TEXT_MUTED, corner_radius=CORNER_RADIUS,
             border_width=0,
             command=lambda: show_letter_window(window, title, company, cover_letter)
         )
@@ -556,13 +605,13 @@ def open_window(parent_window):
             btn_frame, text=tr("btn_apply"), width=110, height=32,
             fg_color=COLOR_CYAN_NEON, hover_color=COLOR_CYAN_HOVER,
             text_color=COLOR_BG_DARK, font=("Arial", 12, "bold"),
-            border_width=0,
+            corner_radius=CORNER_RADIUS, border_width=0,
             command=lambda: open_browser_link(url)
         )
         btn_apply.grid(row=0, column=1, padx=3)
 
         btn_delete = ctk.CTkButton(
-            btn_frame, text="✕", width=32, height=32, corner_radius=6,
+            btn_frame, text="✕", width=32, height=32, corner_radius=CORNER_RADIUS,
             fg_color=COLOR_RED, hover_color=COLOR_RED_HOVER,
             text_color=COLOR_TEXT_LIGHT,
             font=("Arial", 12, "bold"),
@@ -579,12 +628,12 @@ def open_window(parent_window):
         url = item.get("url", "#")
         reason = item.get("reason", "Причина не указана")
 
-        card = ctk.CTkFrame(parent_frame, fg_color=COLOR_CARD_BG, corner_radius=8, border_width=1, border_color=COLOR_INPUT_BG)
+        card = ctk.CTkFrame(parent_frame, fg_color=COLOR_CARD_BG, corner_radius=CORNER_RADIUS, border_width=1, border_color=COLOR_INPUT_BG)
         card.pack(pady=4, padx=5, fill="x")
 
         info_text = f"🏢 {company} | 💼 {title}\n"
         info_lbl = ctk.CTkLabel(
-            card, text=info_text, font=("Arial", 13, "bold"), 
+            card, text=info_text, font=("Arial", 13, "bold"),
             anchor="w", justify="left", text_color=COLOR_RED
         )
         info_lbl.pack(anchor="w", padx=15, pady=(8, 2))
@@ -599,7 +648,7 @@ def open_window(parent_window):
         opt_frame.pack(anchor="e", padx=15, pady=(0, 8))
 
         btn_anyway = ctk.CTkButton(
-            opt_frame, text=tr("btn_anyway"), width=170, height=28, corner_radius=6,
+            opt_frame, text=tr("btn_anyway"), width=170, height=28, corner_radius=CORNER_RADIUS,
             fg_color=COLOR_GOLD, hover_color=COLOR_GOLD_HOVER,
             text_color=COLOR_BG_DARK,
             font=("Arial", 11, "bold"),
@@ -609,7 +658,7 @@ def open_window(parent_window):
         btn_anyway.pack(side="left", padx=5)
 
         btn_delete_rej = ctk.CTkButton(
-            opt_frame, text=tr("btn_delete_rej"), width=150, height=28, corner_radius=6,
+            opt_frame, text=tr("btn_delete_rej"), width=150, height=28, corner_radius=CORNER_RADIUS,
             fg_color=COLOR_CARD_BG, hover_color=COLOR_INPUT_BG,
             text_color=COLOR_TEXT_LIGHT,
             font=("Arial", 11),
@@ -929,7 +978,7 @@ def show_letter_window(parent, title, company, cover_letter):
         top, text=tr("btn_copy"),
         command=copy_to_clipboard, fg_color=COLOR_CYAN_NEON, text_color=COLOR_BG_DARK,
         height=42, font=("Arial", 13, "bold"), hover_color=COLOR_CYAN_HOVER,
-        border_width=0
+        corner_radius=CORNER_RADIUS, border_width=0
     )
     btn_copy.pack(pady=15)
 

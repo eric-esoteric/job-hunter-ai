@@ -1,5 +1,7 @@
 customtkinter
-Flask
-flask-cors
 Pillow
 plyer
+pynput
+pystray
+pyperclip
+pypdf

@@ -14,8 +14,8 @@ _STRINGS = {
         "cb_office":             "Office",
         "cb_hybrid":             "Hybrid",
         "cb_no_rf":              "No local presence 🌐",
-        "cb_location":           "No presence in:",
-        "location_placeholder":  "e.g. Russia, Belarus",
+        "cb_location":           "Your location:",
+        "location_placeholder":  "e.g. Malaysia",
         "status_loaded":         "● Configuration loaded successfully",
         "btn_start":             "START ASSISTANT",
         "btn_stop":              "STOP ASSISTANT",
@@ -41,6 +41,7 @@ _STRINGS = {
         "letter_balanced":       "Balanced",
         "letter_detailed":       "Detailed",
         "cb_notifications":      "Desktop notifications on queue complete & errors",
+        "theme_label":           "Interface Theme:",
         "btn_save":              "SAVE AND CLOSE",
         "status_saved":          "● Configuration saved successfully",
         # API Help window
@@ -62,8 +63,8 @@ _STRINGS = {
             "Vacancies are processed one at a time — the queue is sequential.\n"
             "The delay between vacancies is configurable to your preference.\n\n"
             "However, cover letter generation runs on your PC and must finish\n"
-            "within the timeout. Slow models will time out and the vacancy\n"
-            "will not be saved.\n\n"
+            "within the timeout. Models generating fewer than {min_tps} tokens/sec\n"
+            "will time out and the vacancy will not be saved.\n\n"
             "Tips:\n"
             "• Lightweight models (3B–8B) are strongly recommended.\n"
             "• Close heavy apps to free up RAM and GPU memory.\n"
@@ -75,7 +76,7 @@ _STRINGS = {
         "status_key_required":   "● Enter API key for provider {provider}",
         "status_starting":       "● Starting server — ready in a moment...",
         "btn_starting":          "STARTING...",
-        "status_active":         "● Assistant active. Waiting for vacancies...",
+        "status_active":         "● Assistant active. Press {hotkey} on a job page to capture.",
         "status_stopped":        "● Assistant stopped",
         "status_queue":          "● [{done} done] Pausing {sec}s · {q} in queue",
         "status_analyzing":      "● AI is analyzing the incoming vacancy...",
@@ -106,6 +107,16 @@ _STRINGS = {
         "history_name_empty":    "Please enter a name for the resume.",
         "notif_queue_done":      "Queue complete: {approved} approved, {rejected} rejected",
         "notif_error_body":      "Error processing vacancy. Check AI settings.",
+        "notif_macro_triggered":    "Capturing job page — do not touch the keyboard...",
+        "notif_capture_success":    "Page captured successfully! You may now resume browsing.",
+        # Tray menu
+        "tray_open":             "Open Job Hunter AI",
+        "tray_exit":             "Exit",
+        # Automation / hotkey settings
+        "hotkey_label":          "Capture hotkey:",
+        "hotkey_placeholder":    "e.g. <ctrl>+<shift>+x",
+        "status_capturing":      "● Capturing job page — please wait...",
+        "warn_clipboard":        "⚠ Clipboard busy — capture skipped. Try again.",
         # Results window
         "results_title":         "AI Analysis Results",
         "monitoring":            "AI Monitoring",
@@ -155,8 +166,8 @@ _STRINGS = {
         "cb_office":             "Офис",
         "cb_hybrid":             "Гибрид",
         "cb_no_rf":              "Без локальной привязки \U0001f310",
-        "cb_location":           "Без присутствия в:",
-        "location_placeholder":  "напр. Россия, Беларусь",
+        "cb_location":           "Ваша локация:",
+        "location_placeholder":  "напр. Малайзия",
         "status_loaded":         "● Конфигурация успешно загружена",
         "btn_start":             "ЗАПУСТИТЬ АССИСТЕНТА",
         "btn_stop":              "ОТКЛЮЧИТЬ АССИСТЕНТА",
@@ -182,6 +193,7 @@ _STRINGS = {
         "letter_balanced":       "Сбалансированное",
         "letter_detailed":       "Подробное",
         "cb_notifications":      "Уведомление при завершении очереди и ошибках",
+        "theme_label":           "Тема интерфейса:",
         "btn_save":              "СОХРАНИТЬ И ЗАКРЫТЬ",
         "status_saved":          "● Конфигурация успешно сохранена",
         # API Help window
@@ -203,8 +215,8 @@ _STRINGS = {
             "Вакансии обрабатываются последовательно — одна за другой.\n"
             "Задержка между вакансиями настраивается по вашему усмотрению.\n\n"
             "Однако генерация сопроводительного письма идёт на вашем ПК\n"
-            "и должна уложиться в таймаут. Медленная модель не успеет,\n"
-            "и вакансия не будет сохранена.\n\n"
+            "и должна уложиться в таймаут. Модели со скоростью менее {min_tps} тoken/с\n"
+            "не уложатся в лимит, и вакансия не будет сохранена.\n\n"
             "Советы:\n"
             "• Рекомендуются компактные модели (3B–8B).\n"
             "• Закройте тяжёлые приложения, освободите оперативную память.\n"
@@ -216,7 +228,7 @@ _STRINGS = {
         "status_key_required":   "● Введите API-ключ для провайдера {provider}",
         "status_starting":       "● Запуск сервера — секунду...",
         "btn_starting":          "ЗАПУСК...",
-        "status_active":         "● Ассистент активен. Ожидание вакансий...",
+        "status_active":         "● Ассистент активен. Нажмите {hotkey} на странице вакансии.",
         "status_stopped":        "● Ассистент отключен",
         "status_queue":          "● [{done} обраб.] Пауза {sec}с · в очереди: {q}",
         "status_analyzing":      "● ИИ анализирует прилетевшую вакансию...",
@@ -247,6 +259,16 @@ _STRINGS = {
         "history_name_empty":    "Введите имя резюме.",
         "notif_queue_done":      "Очередь обработана: {approved} одобрено, {rejected} отклонено",
         "notif_error_body":      "Ошибка обработки вакансии. Проверьте настройки AI.",
+        "notif_macro_triggered":    "Захват страницы вакансии — не трогайте клавиатуру...",
+        "notif_capture_success":    "Страница захвачена! Можете продолжать просматривать вакансии.",
+        # Tray menu
+        "tray_open":             "Открыть Job Hunter AI",
+        "tray_exit":             "Выход",
+        # Automation / hotkey settings
+        "hotkey_label":          "Горячая клавиша захвата:",
+        "hotkey_placeholder":    "напр. <ctrl>+<shift>+x",
+        "status_capturing":      "● Захватываю страницу вакансии — пожалуйста, подождите...",
+        "warn_clipboard":        "⚠ Буфер обмена занят — захват пропущен. Попробуйте ещё раз.",
         # Results window
         "results_title":         "Результаты анализа ИИ",
         "monitoring":            "Мониторинг ИИ",
