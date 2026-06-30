@@ -24,7 +24,7 @@
 ---
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/e75a412d-4bca-498c-b096-0264bf2b5e28" controls width="700"></video>
+  <video src="https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999" controls width="700"></video>
 </p>
 ---
 
