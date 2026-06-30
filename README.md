@@ -24,7 +24,7 @@
 ---
 
 <p align="center">
-  <video src="assets/movie.mov" controls width="700"></video>
+  <video src="assets/movie.mp4" controls width="700"></video>
 </p>
 
 ---
