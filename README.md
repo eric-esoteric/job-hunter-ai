@@ -24,7 +24,13 @@
 ---
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999" controls width="700"></video>
+<details>
+<summary><b>▶️ Watch the demo</b></summary>
+<br>
+
+https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999
+
+</details>
 </p>
 
 ---
@@ -242,7 +248,7 @@ The app lives in the **system tray** and runs silently in the background.
 
 ## 🚀 Changelog
 
-<details open>
+<details>
 <summary><b>🟢 v3.0.0 — Standalone. No extension required. (Current)</b></summary>
 
 <br>
@@ -354,7 +360,7 @@ The app lives in the **system tray** and runs silently in the background.
 
 </details>
 
-<details open>
+<details>
 <summary><b>🟢 v3.0.0 — Standalone App, No Extension (Done)</b></summary>
 
 - [x] Chrome extension dropped — global hotkey replaces the entire Flask webhook pipeline.
