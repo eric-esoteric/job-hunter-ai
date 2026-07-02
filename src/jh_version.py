@@ -7,12 +7,13 @@
   - build_exe.py       -> генерация version_info.txt для PyInstaller (метаданные .exe)
 
 Чтобы выпустить новую версию, достаточно поменять APP_VERSION здесь.
-Формат строго "MAJOR.MINOR.PATCH" (три числа), т.к. формат Windows VERSIONINFO
-требует ровно четыре числовых компонента (последний — билд, по умолчанию 0).
+Формат "MAJOR.MINOR" или "MAJOR.MINOR.PATCH". get_version_tuple() безопасно
+дополняет значение нулями до четырёх компонентов, которых требует формат
+Windows VERSIONINFO (последний — билд, по умолчанию 0).
 """
 
 APP_NAME = "Job Hunter AI"
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1"
 
 # Метаданные для свойств .exe в Windows
 COMPANY_NAME = "Job Hunter AI"

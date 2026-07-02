@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-3670A0?style=flat&logo=python&logoColor=ffdd54" alt="Python">
-  <img src="https://img.shields.io/badge/Релиз-v3.0.0-00B981?style=flat" alt="Релиз">
+  <img src="https://img.shields.io/badge/Релиз-v3.1-00B981?style=flat" alt="Релиз">
   <img src="https://img.shields.io/badge/Платформа-Windows%20%7C%20Linux-0078D4?style=flat&logo=linux&logoColor=white" alt="Платформа">
   <img src="https://img.shields.io/badge/Лицензия-Некоммерческая-EF4444?style=flat" alt="Лицензия">
 </p>
@@ -50,7 +50,7 @@ https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999
         <li>🔑 <b>Одна клавиша — любой браузер</b> — Chrome, Firefox, Edge, Brave, любой сайт</li>
         <li>🛡️ <b>Жёсткий фильтр до 60%</b> — скам, MLM, токсичные условия и инфобиз не проходят</li>
         <li>✍️ <b>Письмо за секунды</b> — персонализированный отклик под реальные боли работодателя</li>
-        <li>🌐 <b>Облако или ваш ПК</b> — Gemini, GPT-5, Claude 4 <i>или</i> Ollama / LM Studio (офлайн)</li>
+        <li>🌐 <b>Облако или ваш ПК</b> — Gemini, GPT-5, Claude 4, DeepSeek, OpenRouter <i>или</i> Ollama / LM Studio (офлайн)</li>
         <li>🔒 <b>Полная приватность</b> — при локальном ИИ данные не покидают машину</li>
         <li>🌍 <b>EN / RU</b> — язык интерфейса = язык писем и обработки PDF-резюме</li>
       </ul>
@@ -106,7 +106,7 @@ https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999
   <tr>
     <td width="60%" valign="top">
       <b>🧠 Многодвижковый ИИ-каскад с Failover</b><br>
-      Автоматическое переключение между Gemini, GPT-5, Claude 4, DeepSeek и локальными моделями. Если приоритетный провайдер недоступен — следующий берёт задачу без потерь.
+      Автоматическое переключение между Gemini, GPT-5, Claude 4, DeepSeek, OpenRouter и локальными моделями. Если приоритетный провайдер недоступен — следующий берёт задачу без потерь.
       <br><br>
       <b>🏠 Локальный ИИ — без интернета и API-ключей</b><br>
       Нативная HTTP-интеграция с Ollama и LM Studio. Фоновый зонд проверяет доступность сервера и подсвечивает статус в интерфейсе. Специальные <code>LOCAL_SAFE_PARAMS</code> нивелируют артефакты квантованных 4-битных моделей.
@@ -185,8 +185,9 @@ https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999
                   │  Этап 1  12 000 симв. → Фильтр     │
                   │  Этап 2   8 000 симв. → Письмо    │
                   │                                    │
-                  │  Gemini → GPT-5 → Claude 4         │  Failover Chain
-                  │  → DeepSeek → Ollama → LM Studio   │  Exp. Backoff
+                  │  Gemini → GPT-5 → Claude 4 →       │  Failover Chain
+                  │  DeepSeek → OpenRouter →           │  Exp. Backoff
+                  │  Ollama → LM Studio                │
                   │  5-уровневый ремонт JSON           │
                   └──────────┬─────────────┬──────────┘
                   ОТКЛОНЕНО  │             │ ОДОБРЕНО
@@ -234,7 +235,7 @@ https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999
 | **Захват горячих клавиш** | `pynput.keyboard.GlobalHotKeys` · аппаратные VK-коды (независимо от раскладки) · `pyperclip` буфер обмена |
 | **Защита платформы** | `PlatformSecurityException` · Wayland zero-trust guard · мягкая деградация при неподдерживаемой сессии |
 | **Локализация** | `jh_i18n.py` — декларативная EN/RU система с `tr(key, **kwargs)` и именованной подстановкой |
-| **AI-каскад** | **Gemini 2.5** · **GPT-5 / o3** · **Claude 4** · **DeepSeek** (chat / reasoner) · **Ollama** · **LM Studio** |
+| **AI-каскад** | **Gemini 2.5** · **GPT-5 / o3** · **Claude 4** · **DeepSeek** (chat / reasoner) · **OpenRouter** (мультивендор) · **Ollama** · **LM Studio** |
 | **Конвейер скоринга** | `extract_relevant_context()` · `_VACANCY_KW_RE` · Правило нарратива · `pack_paragraphs_to_budget()` |
 | **Отказоустойчивость** | Failover Chain · Exponential Backoff · 5-уровневый JSON-ремонт · иерархия `AINetworkError` / `AITimeoutError` / `AIAuthError` / `AIRateLimitError` |
 | **Хранилище** | `_write_json_atomic()` Write-Copy-Replace + `fsync` · `_file_lock` + `_url_lock` · O(1) дедуп · живые URL-сеты |
@@ -247,8 +248,37 @@ https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999
 
 ## 🚀 История обновлений
 
+<details open>
+<summary><b>🟢 v3.1 — Провайдер OpenRouter + повышение надёжности (Текущая версия)</b></summary>
+
+<br>
+
+> **Добавлен OpenRouter как шестой ИИ-провайдер и исправлен ряд проблем надёжности и приватности, выявленных полным аудитом кода.**
+
+**Новый провайдер**
+
+* **[AI]** Новый `OpenRouterProvider` (`jh_ai_engine.py`) — облачный агрегатор, дающий доступ ко множеству вендоров (OpenAI, Anthropic, Google, DeepSeek, …) через единый OpenAI-совместимый эндпоинт (`https://openrouter.ai/api/v1/chat/completions`). Модели адресуются в формате `vendor/model` (например `openai/gpt-5-mini`, `anthropic/claude-4-sonnet`). Требует ключ API; работает через тот же Failover Chain, что и остальные облачные провайдеры. Зарегистрирован в `get_provider()`, `PROVIDER_ORDER`, `ALL_PROVIDERS_MODELS` и дефолтах конфига (`api_keys` / `active_models`) — существующие конфиги автоматически получают новые ключи при загрузке.
+
+**Исправления надёжности**
+
+* **[Фикс]** **Множество дедупликации отклонённых рассинхронизировалось с диском.** `save_rejected_vacancy()` ограничивает журнал на диске 50 записями, но добавлял каждый URL в набор `_rejected_urls` в памяти, никогда не удаляя вытесненные. Набор рос неограниченно и продолжал считать вытесненные вакансии «уже отклонёнными», из-за чего их нельзя было переоценить. Теперь набор пересобирается из ограниченного списка при каждой записи.
+* **[Фикс]** **Пустой контекст уходил в LLM на страницах без разбиения на абзацы.** `extract_relevant_context()` делил текст только по пустым строкам, поэтому захват через `Ctrl+A` с одиночными `\n` схлопывался в один огромный блок, который пропускался целиком, возвращая `""`. Добавлены запасное разбиение по одиночным переводам строк и гарантия жёсткой обрезки: непустая страница всегда даёт непустой контент в рамках бюджета символов.
+* **[Фикс]** **Дедупликация и обратная связь очереди были «мёртвым» кодом.** Движок захвата писал напрямую в очередь, минуя `enqueue_vacancy()` — поэтому дедуп до постановки в очередь, счётчик `_batch_id` и статус «добавлено в очередь» не работали, а дубликаты отбрасывались только после полного отсчёта задержки. Теперь движок ходит через `_EnqueueAdapter`, что восстанавливает O(1)-дедуп и корректные уведомления о завершении пачки.
+* **[Перф]** Прекращено перечитывание и повторный парсинг `config.json` с диска на **каждой** обработанной вакансии (`process_incoming_vacancy`); конфиг в памяти и так поддерживается актуальным окном настроек.
+* **[Перф]** PDF-импорт больше не вызывает `page.extract_text()` дважды на страницу.
+
+**Безопасность и корректность**
+
+* **[Безопасность]** Ключ API Gemini перенесён из query-строки URL в заголовок `x-goog-api-key` (query-строки утекают в логи и тексты исключений).
+* **[Фикс]** Ремонт JSON больше не портит апострофы: смешанный режим кавычек конвертирует только одинарные кавычки-ограничители строк, оставляя значения вида `don't` нетронутыми.
+* **[Фикс]** Гео-сопоставление (`_geo_match`, теперь на уровне модуля и покрыто тестами) использует наборы слов-токенов вместо «сырых» подстрок — `"India"` больше не совпадает с `"Indiana"`.
+* **[Чистка]** Явный флаг `is_error` в `send_notification()` (без хрупкого угадывания по подстроке), `hashlib.md5(..., usedforsecurity=False)` для хеша-дедупа и стартовая очистка «осиротевших» `*.tmp`-файлов после жёсткого выхода.
+* **[Тесты]** Добавлен `tests/test_bugfixes.py` (синхронизация набора отклонённых, гео-сопоставление, ремонт JSON) и расширен `tests/test_scoring_pipeline.py` под новый контракт извлечения.
+
+</details>
+
 <details>
-<summary><b>🟢 v3.0.0 — Автономное приложение. Расширение больше не нужно. (Текущая версия)</b></summary>
+<summary><b>🟢 v3.0.0 — Автономное приложение. Расширение больше не нужно.</b></summary>
 
 <br>
 
@@ -379,7 +409,7 @@ https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999
 </details>
 
 <details>
-<summary><b>🔵 v3.1.0 — macOS (Запланировано)</b></summary>
+<summary><b>🔵 v3.2 — macOS (Запланировано)</b></summary>
 
 - [ ] Поддержка macOS — kVK-коды уже реализованы в `jh_automation.py`, требуется сквозное тестирование.
 - [ ] `build_mac.py` с `.app`-бандлом и упаковкой в `.dmg`.
@@ -413,5 +443,5 @@ https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999
 ---
 
 <p align="center">
-  <sub>Made for people who value their time · Non-Commercial · v3.0.0</sub>
+  <sub>Made for people who value their time · Non-Commercial · v3.1</sub>
 </p>

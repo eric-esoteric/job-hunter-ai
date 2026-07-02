@@ -1,5 +1,8 @@
 # jh_notifications.py — in-app Telegram-style toast (no external dependencies)
 import threading
+from jh_log import get_logger
+
+logger = get_logger(__name__)
 
 _toast_ref = [None]           # единственный активный тост; новый вытесняет старый
 _notification_lock = threading.Lock()  # guards _toast_ref mutations from concurrent threads
@@ -50,7 +53,7 @@ def _get_scale(root) -> float:
     try:
         return root._get_window_scaling()
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
     try:
         import ctypes
         dpi = ctypes.windll.user32.GetDpiForSystem()
@@ -67,7 +70,7 @@ def _play_sound(is_error: bool) -> None:
         # MB_ICONASTERISK(64)    — информация, стандартный звук уведомления
         winsound.MessageBeep(48 if is_error else 64)
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
 
 def _build_toast_safe(root, message: str, is_error: bool = False, on_click=None) -> None:
@@ -83,7 +86,7 @@ def _build_toast_safe(root, message: str, is_error: bool = False, on_click=None)
                 if _toast_ref[0].winfo_exists():
                     _toast_ref[0].destroy()
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             finally:
                 _toast_ref[0] = None
 
@@ -126,7 +129,7 @@ def _build_toast_safe(root, message: str, is_error: bool = False, on_click=None)
         try:
             toast.destroy()
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
     def _handle_click(event=None):
         _close()
@@ -137,7 +140,7 @@ def _build_toast_safe(root, message: str, is_error: bool = False, on_click=None)
                 try:
                     on_click()
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
 
     # ── Внутренний контейнер на 1px меньше со всех сторон ───────────────────
     _body_cursor = "hand2" if on_click is not None else ""
@@ -218,7 +221,7 @@ def _build_toast_safe(root, message: str, is_error: bool = False, on_click=None)
             try:
                 toast.destroy()
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             # Nullify the global reference only if it still points to this exact instance.
             if _toast_ref[0] is toast:
                 _toast_ref[0] = None
@@ -227,32 +230,38 @@ def _build_toast_safe(root, message: str, is_error: bool = False, on_click=None)
             toast.attributes("-alpha", alpha)
             toast.after(22, lambda: _fade_out_instance(alpha))
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
     # Звук в фоновом потоке (не блокирует UI)
     threading.Thread(target=_play_sound, args=(is_error,), daemon=True).start()
     _slide(start_y)
 
 
-def send_notification(title: str, message: str, root=None, on_click=None) -> None:
+def send_notification(title: str, message: str, root=None, on_click=None,
+                      is_error: bool | None = None) -> None:
     """
     Показывает уведомление.
     root → встроенный тост с правильным DPI-масштабированием.
     Без root → системное уведомление через plyer / win10toast (fallback).
     on_click → вызывается при клике по телу тоста (только для встроенного тоста).
+    is_error → явно задаёт стиль (ошибка/успех). Если None — определяется
+               эвристически по подстрокам, но вызывающему коду следует
+               передавать флаг явно, т.к. эвристика хрупкая
+               (например, 'error-free' ложно распознаётся как ошибка).
     """
-    is_error = (
-        "ошибк" in message.lower()
-        or "error" in message.lower()
-        or "ошибк" in title.lower()
-    )
+    if is_error is None:
+        is_error = (
+            "ошибк" in message.lower()
+            or "error" in message.lower()
+            or "ошибк" in title.lower()
+        )
 
     if root is not None:
         try:
             root.after(0, lambda: _build_toast_safe(root, message, is_error, on_click))
             return
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
     # ── Fallback на системные уведомления ────────────────────────────────────
     try:
@@ -260,9 +269,9 @@ def send_notification(title: str, message: str, root=None, on_click=None) -> Non
         notification.notify(title=title, message=message, app_name="Job Hunter AI", timeout=5)
         return
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
     try:
         from win10toast import ToastNotifier
         ToastNotifier().show_toast(title, message, duration=5, threaded=True)
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)

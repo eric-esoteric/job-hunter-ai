@@ -1,4 +1,8 @@
 # jh_i18n.py — bilingual string store (EN default, RU optional)
+from jh_log import get_logger
+
+logger = get_logger(__name__)
+
 _STRINGS = {
     "en": {
         # Main window
@@ -134,6 +138,8 @@ _STRINGS = {
         "btn_delete_rej":        "Remove from history ✕",
         "no_link":               "The vacancy link is missing.",
         "link_error":            "Could not open link: {e}",
+        "invalid_link_title":    "Blocked unsafe link",
+        "invalid_link_body":     "This vacancy link looks unsafe and was blocked: {reason}",
         "letter_win_title":      "Cover Letter",
         "btn_copy":              "\U0001f4cb Copy letter",
         "copied_ok_text":        "Copied! ✓",
@@ -286,6 +292,8 @@ _STRINGS = {
         "btn_delete_rej":        "Удалить из истории ✕",
         "no_link":               "Ссылка на вакансию отсутствует.",
         "link_error":            "Не удалось открыть ссылку: {e}",
+        "invalid_link_title":    "Небезопасная ссылка заблокирована",
+        "invalid_link_body":     "Эта ссылка на вакансию выглядит небезопасной и была заблокирована: {reason}",
         "letter_win_title":      "Сопроводительное письмо",
         "btn_copy":              "\U0001f4cb Скопировать письмо",
         "copied_ok_text":        "Скопировано! ✓",
@@ -325,5 +333,5 @@ def tr(key: str, **kwargs) -> str:
         try:
             text = text.format(**kwargs)
         except (KeyError, ValueError):
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
     return text

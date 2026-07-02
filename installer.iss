@@ -2,7 +2,7 @@
 ; Настроен на работу с относительными путями (полная свобода перемещения папок!)
 
 #define MyAppName "Job Hunter AI"
-#define MyAppVersion "3.0.0"
+#define MyAppVersion "3.1"
 #define MyAppPublisher "Job Hunter"
 #define MyAppExeName "Job Hunter AI.exe"
 ; Используем точку ".", чтобы пути искались относительно папки со скриптом

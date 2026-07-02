@@ -2,6 +2,9 @@ import json
 import os
 import tempfile
 import threading
+from jh_log import get_logger
+
+logger = get_logger(__name__)
 
 # Путь к системной папке AppData\Roaming для текущего пользователя Windows.
 APPDATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'Job Hunter AI')
@@ -26,6 +29,7 @@ def _build_url_set_unlocked(filepath: str) -> set:
             data = json.load(f)
         return {v.get("url") for v in data if v.get("url") and v.get("url") != "#"}
     except Exception:
+        logger.warning(f"[Хранилище]: Не удалось построить набор URL из {filepath}", exc_info=True)
         return set()
 
 # Автоматически создаем папку "Job Hunter AI" в AppData, если её ещё нет на компьютере.
@@ -54,7 +58,9 @@ def _migrate_strip_description() -> None:
             with open(APPROVED_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except Exception:
-            return   # unreadable on startup — let init_db() establish a fresh state
+            # unreadable on startup — let init_db() establish a fresh state
+            logger.debug("[Migration]: approved file unreadable, skipping", exc_info=True)
+            return
 
         migrated = False
         for item in data:
@@ -67,12 +73,31 @@ def _migrate_strip_description() -> None:
 
         try:
             _write_json_atomic(APPROVED_FILE, data)
-            print(f"[Migration]: Removed 'description' from {len(data)} approved vacancy records.")
+            logger.info(f"[Migration]: Removed 'description' from {len(data)} approved vacancy records.")
         except RuntimeError as exc:
-            print(f"[Migration]: {exc}")
+            logger.warning(f"[Migration]: {exc}")
+
+def _sweep_stale_tmp_files() -> None:
+    """
+    Remove orphaned atomic-write temp files left behind if the process was
+    hard-killed (e.g. os._exit) mid-write. The temp files use the "jh_" prefix
+    (see _write_json_atomic) and the theme writer's "ls_" prefix. Safe to run
+    at startup while single-threaded — no live writer can own them yet.
+    """
+    try:
+        for name in os.listdir(APPDATA_DIR):
+            if (name.startswith("jh_") or name.startswith("ls_")) and name.endswith(".tmp"):
+                try:
+                    os.remove(os.path.join(APPDATA_DIR, name))
+                except OSError:
+                    logger.debug("Suppressed exception", exc_info=True)
+    except OSError:
+        logger.debug("Suppressed exception", exc_info=True)
+
 
 def init_db():
     """Создает пустые файлы баз данных, если они отсутствуют."""
+    _sweep_stale_tmp_files()
     if not os.path.exists(APPROVED_FILE):
         _save_file(APPROVED_FILE, [])
     if not os.path.exists(REJECTED_FILE):
@@ -94,10 +119,10 @@ def _load_file(filepath):
             with open(filepath, "r", encoding="utf-8") as f:
                 return json.load(f)
         except json.JSONDecodeError as e:
-            print(f"[Хранилище]: Повреждён JSON в {filepath}: {e}. Возвращён пустой список.")
+            logger.error(f"[Хранилище]: Повреждён JSON в {filepath}: {e}. Возвращён пустой список.")
             return []
         except OSError as e:
-            print(f"[Хранилище]: Ошибка чтения {filepath}: {e}. Возвращён пустой список.")
+            logger.error(f"[Хранилище]: Ошибка чтения {filepath}: {e}. Возвращён пустой список.")
             return []
 
 def _write_json_atomic(filepath: str, data) -> None:
@@ -126,7 +151,7 @@ def _write_json_atomic(filepath: str, data) -> None:
         try:
             os.remove(tmp_path)
         except OSError:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
         raise RuntimeError(f"Atomic write failed for {filepath}: {exc}")
 
 
@@ -136,7 +161,7 @@ def _save_file(filepath, data):
         try:
             _write_json_atomic(filepath, data)
         except Exception as e:
-            print(f"[Хранилище]: Не удалось записать {filepath}: {e}")
+            logger.error(f"[Хранилище]: Не удалось записать {filepath}: {e}")
 
 
 def _modify_file(filepath: str, mutation_callback) -> bool:
@@ -166,7 +191,7 @@ def _modify_file(filepath: str, mutation_callback) -> bool:
             _write_json_atomic(filepath, mutated_data)
             return True
         except RuntimeError as exc:
-            print(f"[Хранилище]: {exc}")
+            logger.warning(f"[Хранилище]: {exc}")
             return False
 
 def load_config():
@@ -181,6 +206,10 @@ def load_config():
         "filter_no_rf": True,
         "filter_location": True,
         "user_location": "USA",
+        # Hard country gate (jh_ai_engine.analyze_and_generate): when set, any
+        # vacancy whose extracted "vacancy_country" doesn't match is rejected
+        # outright. Empty string disables the gate.
+        "target_country": "",
         "filter_strictness": 2,
         "letter_length": 2,
         "notifications_enabled": True,
@@ -191,6 +220,7 @@ def load_config():
             "OpenAI": "",
             "Anthropic": "",
             "DeepSeek": "",
+            "OpenRouter": "",
             "Ollama": "local",
             "LM Studio": "local"
         },
@@ -199,6 +229,7 @@ def load_config():
             "OpenAI": ["gpt-5-mini"],
             "Anthropic": ["claude-4-haiku"],
             "DeepSeek": ["deepseek-chat"],
+            "OpenRouter": ["openai/gpt-5-mini"],
             "Ollama": ["local-model"],
             "LM Studio": ["local-model"]
         },
@@ -239,7 +270,7 @@ def load_config():
                 lang = user_config.get("language", "en")
                 user_config["user_location"] = "Russia" if lang == "ru" else "United States"
                 _save_file(CONFIG_FILE, user_config)
-                print("[Миграция]: filter_no_rf → filter_location выполнена.")
+                logger.info("[Миграция]: filter_no_rf → filter_location выполнена.")
 
             # Автоматическая миграция устаревших моделей Gemini на 2026 год
             if "active_models" in user_config and "Gemini" in user_config["active_models"]:
@@ -253,7 +284,7 @@ def load_config():
                     seen = set()
                     user_config["active_models"]["Gemini"] = [x for x in gemini_active if not (x in seen or seen.add(x))]
                     _save_file(CONFIG_FILE, user_config)
-                    print("[Сборщик-Миграция]: Конфигурация Gemini успешно обновлена.")
+                    logger.info("[Сборщик-Миграция]: Конфигурация Gemini успешно обновлена.")
 
             # Миграция Ollama: старые захардкоженные имена моделей → "local-model"
             if "active_models" in user_config and "Ollama" in user_config["active_models"]:
@@ -261,7 +292,7 @@ def load_config():
                 if isinstance(ollama_models, list) and ollama_models and "local-model" not in ollama_models:
                     user_config["active_models"]["Ollama"] = ["local-model"]
                     _save_file(CONFIG_FILE, user_config)
-                    print("[Сборщик-Миграция]: Конфигурация Ollama обновлена до local-model.")
+                    logger.info("[Сборщик-Миграция]: Конфигурация Ollama обновлена до local-model.")
 
             # Migrate legacy "capture_hotkey" pynput string → structured "hotkey" dict.
             # Runs once; the old key is removed so this branch is never entered again.
@@ -285,17 +316,17 @@ def load_config():
                     "key":  key or "X",
                 }
                 _save_file(CONFIG_FILE, user_config)
-                print("[Migration]: 'capture_hotkey' string → 'hotkey' dict completed.")
+                logger.info("[Migration]: 'capture_hotkey' string → 'hotkey' dict completed.")
 
             return user_config
     except json.JSONDecodeError as e:
-        print(f"[Конфигурация]: Файл config.json повреждён (JSON): {e}. Используются значения по умолчанию.")
+        logger.error(f"[Конфигурация]: Файл config.json повреждён (JSON): {e}. Используются значения по умолчанию.")
         return default_config
     except OSError as e:
-        print(f"[Конфигурация]: Ошибка чтения config.json: {e}. Используются значения по умолчанию.")
+        logger.error(f"[Конфигурация]: Ошибка чтения config.json: {e}. Используются значения по умолчанию.")
         return default_config
     except Exception as e:
-        print(f"[Конфигурация]: Непредвиденная ошибка загрузки config.json: {e}. Используются значения по умолчанию.")
+        logger.error(f"[Конфигурация]: Непредвиденная ошибка загрузки config.json: {e}. Используются значения по умолчанию.")
         return default_config
 
 def save_config(config_data):
@@ -332,35 +363,76 @@ def set_show_local_warning(value):
     config["show_local_llm_warning"] = bool(value)
     save_config(config)
 
-def save_approved_vacancy(company, title, url, cover_letter="", description=""):
+def save_approved_vacancy(company, title, url, cover_letter="", description="", vacancy_country=""):
     """Атомарно добавляет новую одобренную ИИ вакансию в список."""
     # description (raw page text) intentionally not stored — can be hundreds of KB
     # per vacancy, is never read back from the file, and would make _modify_file()
     # progressively slower with each new record, causing request timeouts at scale.
-    new_vacancy = {"company": company, "title": title, "url": url, "cover_letter": cover_letter}
+    new_vacancy = {
+        "company": company,
+        "title": title,
+        "url": url,
+        "cover_letter": cover_letter,
+        # Country extracted by the AI engine's Stage 1 gate (may be "" if
+        # undeterminable, or if the vacancy was processed before this field
+        # was introduced — see _with_country_default() on the read path).
+        "vacancy_country": vacancy_country or "",
+    }
     if _modify_file(APPROVED_FILE, lambda data: data + [new_vacancy]):
         if url and url != "#":
             with _url_lock:
                 _approved_urls.add(url)
 
-def save_rejected_vacancy(company, title, url, reason=""):
+def save_rejected_vacancy(company, title, url, reason="", vacancy_country=""):
     """Атомарно добавляет отклоненную вакансию в журнал (макс 50 записей)."""
-    new_vacancy = {"company": company, "title": title, "url": url, "reason": reason}
+    new_vacancy = {
+        "company": company,
+        "title": title,
+        "url": url,
+        "reason": reason,
+        "vacancy_country": vacancy_country or "",
+    }
+    _capped_ref = {}
+
     def _append_capped(data):
         data.append(new_vacancy)
-        return data[-50:] if len(data) > 50 else data
+        capped = data[-50:] if len(data) > 50 else data
+        _capped_ref["data"] = capped
+        return capped
+
     if _modify_file(REJECTED_FILE, _append_capped):
-        if url and url != "#":
-            with _url_lock:
-                _rejected_urls.add(url)
+        # Rebuild the in-memory set from the CAPPED list, not by blindly adding
+        # the new URL. Records evicted by the 50-item cap must also drop out of
+        # the set — otherwise the set grows unbounded and keeps reporting
+        # evicted vacancies as "already rejected", so they can never be
+        # re-evaluated (they'd be silently skipped by the dedup check forever).
+        with _url_lock:
+            _rejected_urls.clear()
+            _rejected_urls.update(
+                v.get("url")
+                for v in _capped_ref.get("data", [])
+                if v.get("url") and v.get("url") != "#"
+            )
+
+def _with_country_default(records: list) -> list:
+    """
+    Deserialization compatibility shim: records written before the
+    'vacancy_country' field existed won't have the key on disk. Backfill it
+    in-memory on read so downstream code (UI, filters, exports) can always
+    rely on the key being present without special-casing old records.
+    Does not rewrite the file — purely a read-time default.
+    """
+    for record in records:
+        record.setdefault("vacancy_country", "")
+    return records
 
 def get_all_approved():
     """Возвращает список всех сохраненных вакансий."""
-    return _load_file(APPROVED_FILE)
+    return _with_country_default(_load_file(APPROVED_FILE))
 
 def get_all_rejected():
     """Возвращает список всех отклоненных вакансий."""
-    return _load_file(REJECTED_FILE)
+    return _with_country_default(_load_file(REJECTED_FILE))
 
 def delete_vacancy_by_url(url):
     """Атомарно удаляет одобренную вакансию по URL."""

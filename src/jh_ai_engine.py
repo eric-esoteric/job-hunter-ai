@@ -5,6 +5,9 @@ import urllib.request
 import urllib.error
 import socket
 import time
+from jh_log import get_logger
+
+logger = get_logger(__name__)
 
 
 # =====================================================================
@@ -71,6 +74,85 @@ MIN_TOKENS_PER_SEC = 12
 QUEUE_TIME_BUDGET_SEC = 60
 
 
+# =====================================================================
+# КОНФИГУРИРУЕМЫЙ BLOCKLIST НИЗКОУРОВНЕВЫХ ЗАДАЧ (Product-Tier Assessment)
+# Используется в Stage 1, REJECTION CRITERION 5 / Part A (strictness == 3),
+# чтобы отсеивать вакансии, формально совпадающие по профессиональному
+# домену кандидата, но фактически представляющие собой legacy/примитивную
+# автоматизацию, не соответствующую заявленному уровню middle/senior.
+# Переопределяется через config["low_tier_task_blocklist"] (list[str]).
+# =====================================================================
+DEFAULT_LOW_TIER_TASK_BLOCKLIST = [
+    # English
+    "excel macro", "vba script", "manual excel parsing", "spreadsheet automation",
+    "simple web scraper", "scraping wrapper", "csv to excel converter",
+    "basic crud wrapper", "screen scraping", "legacy vb6", "legacy delphi",
+    "access database maintenance", "simple bot script", "telegram bot wrapper",
+    "basic parsing script", "no-code automation", "zapier workflow setup",
+    "google sheets script", "data entry automation", "copy-paste automation",
+    # Russian
+    "макросы excel", "vba скрипт", "парсер сайтов", "простой скрипт парсинга",
+    "выгрузка в excel", "автоматизация экселя", "написание макросов",
+    "простой телеграм бот", "заливка данных в excel", "ручной парсинг",
+    "поддержка access", "легаси vb6", "легаси delphi", "no-code автоматизация",
+]
+
+
+_GEO_ALIASES = {
+    # English abbreviations
+    "us": "united states", "usa": "united states", "u.s.": "united states",
+    "u.s.a.": "united states", "america": "united states",
+    "uk": "united kingdom", "u.k.": "united kingdom", "gb": "united kingdom",
+    "great britain": "united kingdom", "britain": "united kingdom",
+    "uae": "united arab emirates",
+    "ksa": "saudi arabia",
+    # Russian-language user input
+    "сша": "united states", "великобритания": "united kingdom",
+    "рф": "russia", "россия": "russia", "российская федерация": "russia",
+    "беларусь": "belarus", "украина": "ukraine",
+    "германия": "germany", "австрия": "austria", "швейцария": "switzerland",
+    "польша": "poland", "чехия": "czech republic", "словакия": "slovakia",
+    "нидерланды": "netherlands", "голландия": "netherlands",
+    "испания": "spain", "франция": "france", "италия": "italy",
+    "швеция": "sweden", "норвегия": "norway", "дания": "denmark",
+    "финляндия": "finland", "канада": "canada", "австралия": "australia",
+    "малайзия": "malaysia", "вьетнам": "vietnam", "япония": "japan",
+    "китай": "china", "индия": "india",
+}
+
+
+def _normalize_geo(name: str) -> str:
+    n = str(name).lower().strip()
+    return _GEO_ALIASES.get(n, n)
+
+
+def _geo_match(user_loc: str, regions: list) -> bool:
+    """
+    True if the user's location and one of the vacancy regions refer to the
+    same place.
+
+    Matching is done on whole-word token sets, NOT loose substrings, so
+    "india" no longer matches "indiana" and "oman" no longer matches
+    "romania".  Two names match when they are equal after normalisation, or
+    when one name's complete token set is contained in the other's
+    (e.g. "united states" ⊆ "united states of america").
+    """
+    u = _normalize_geo(user_loc)
+    if not u:
+        return False
+    u_tokens = set(re.findall(r"\w+", u))
+    for r in regions:
+        r_n = _normalize_geo(r)
+        if not r_n:
+            continue
+        if u == r_n:
+            return True
+        r_tokens = set(re.findall(r"\w+", r_n))
+        if u_tokens and r_tokens and (u_tokens <= r_tokens or r_tokens <= u_tokens):
+            return True
+    return False
+
+
 def clean_and_parse_json(raw_text):
     """
     Очищает вывод LLM и парсит JSON с многоуровневым ремонтом.
@@ -102,14 +184,14 @@ def clean_and_parse_json(raw_text):
     try:
         return json.loads(json_str)
     except json.JSONDecodeError:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
     # Уровень 2: висящие запятые перед } и ]
     repaired = re.sub(r",\s*([\]}])", r"\1", json_str)
     try:
         return json.loads(repaired)
     except json.JSONDecodeError:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
     # Уровень 3: Python True/False/None → JSON true/false/null
     repaired = re.sub(r"\bTrue\b", "true", repaired)
@@ -118,7 +200,7 @@ def clean_and_parse_json(raw_text):
     try:
         return json.loads(repaired)
     except json.JSONDecodeError:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
     # Уровень 4: одинарные кавычки → двойные (только если двойных нет совсем)
     if "'" in repaired and '"' not in repaired:
@@ -126,17 +208,20 @@ def clean_and_parse_json(raw_text):
         try:
             return json.loads(candidate)
         except json.JSONDecodeError:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
-    # Уровень 5: смешанный режим — одинарные ключи, двойные значения или наоборот
+    # Уровень 5: смешанный режим — конвертируем ТОЛЬКО одинарные кавычки,
+    # выступающие ограничителями JSON-строк (примыкающие к структурной
+    # пунктуации { } [ ] : , или пробелу), не трогая апострофы внутри слов
+    # (например, "don't"), чтобы не портить корректные значения.
     if "'" in repaired:
-        candidate = repaired.replace("'", '"')
+        candidate = re.sub(r"(?<=[{\[,:\s])'|'(?=[}\],:\s])", '"', repaired)
         try:
             return json.loads(candidate)
         except json.JSONDecodeError:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
-    print(f"[ИИ-Движок-Ошибка]: Не удалось восстановить JSON после всех уровней ремонта. "
+    logger.error(f"[ИИ-Движок-Ошибка]: Не удалось восстановить JSON после всех уровней ремонта. "
           f"Сырой текст (обрезано): {json_str[:500]}")
     raise AIResponseParseError(f"ИИ вернул неисправимый формат данных после {5} попыток ремонта.")
 
@@ -194,7 +279,7 @@ class BaseProvider:
 
         last_exception = None
         for model_name in self.model_pool:
-            print(f"[ИИ-Движок]: Запуск запроса на модели {model_name}...")
+            logger.info(f"[ИИ-Движок]: Запуск запроса на модели {model_name}...")
             for attempt in range(3):
                 try:
                     return self.make_request(model_name, contents, system_instruction)
@@ -217,7 +302,7 @@ class BaseProvider:
                             f"Ошибка авторизации API ({status}). Проверьте правильность ключа."
                         )
 
-                    print(f"[ИИ-Движок]: Модель {model_name} вернула HTTP {status}. Пробуем следующую модель...")
+                    logger.warning(f"[ИИ-Движок]: Модель {model_name} вернула HTTP {status}. Пробуем следующую модель...")
                     last_exception = AINetworkError(
                         f"Модель {model_name} вернула HTTP-ошибку {status}."
                     )
@@ -225,7 +310,7 @@ class BaseProvider:
                 except urllib.error.URLError as e:
                     # Сетевой уровень: отказ соединения, таймаут, недоступный хост.
                     structured = self._classify_url_error(e, model_name)
-                    print(f"[ИИ-Движок]: {structured.detail}")
+                    logger.warning(f"[ИИ-Движок]: {structured.detail}")
                     last_exception = structured
                     # Для локального сервера, который не запущен, перебор моделей бессмыслен.
                     if isinstance(structured, AILocalServerError):
@@ -234,18 +319,18 @@ class BaseProvider:
                     break
                 except socket.timeout:
                     structured = AITimeoutError(f"Таймаут ответа модели {model_name}.")
-                    print(f"[ИИ-Движок]: {structured.detail}")
+                    logger.warning(f"[ИИ-Движок]: {structured.detail}")
                     last_exception = structured
                     time.sleep(1)
                     break
                 except AIEngineError as e:
                     # Уже структурированная ошибка (например, пустой ответ модели).
-                    print(f"[ИИ-Движок]: {e.detail}")
+                    logger.warning(f"[ИИ-Движок]: {e.detail}")
                     last_exception = e
                     break
                 except Exception as e:
                     # Непредвиденный сбой — логируем с типом и переходим к следующей модели.
-                    print(f"[ИИ-Движок]: Непредвиденный сбой модели {model_name} ({type(e).__name__}): {e}")
+                    logger.error(f"[ИИ-Движок]: Непредвиденный сбой модели {model_name} ({type(e).__name__}): {e}")
                     last_exception = AIEngineError(f"Непредвиденный сбой: {type(e).__name__}: {e}")
                     time.sleep(1)
                     break
@@ -261,9 +346,10 @@ class BaseProvider:
 class GeminiProvider(BaseProvider):
     """Провайдер Google Gemini API (поддержка 3-го поколения моделей)."""
     def make_request(self, model_name, contents, system_instruction):
-        # ФИКС: Убран Markdown-синтаксис, ссылка теперь абсолютно чистая и валидная
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self.api_key}"
-        headers = {"Content-Type": "application/json"}
+        # Ключ передаётся в заголовке x-goog-api-key, а не в query-строке URL:
+        # query-строки чаще всего попадают в логи, дампы и тексты исключений.
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        headers = {"Content-Type": "application/json", "x-goog-api-key": self.api_key}
         payload = {
             "contents": [{"parts": [{"text": contents}]}],
             "systemInstruction": {"parts": [{"text": system_instruction}]},
@@ -375,6 +461,48 @@ class DeepSeekProvider(BaseProvider):
             return choices[0]['message']['content'].strip()
 
 
+class OpenRouterProvider(BaseProvider):
+    """
+    Провайдер OpenRouter — облачный агрегатор моделей многих вендоров через
+    единый OpenAI-совместимый API (https://openrouter.ai/api/v1).
+
+    Требует ключ API. Модели адресуются в формате 'vendor/model'
+    (например 'openai/gpt-5-mini', 'anthropic/claude-4-sonnet'). Работает
+    через тот же Failover Chain, что и остальные облачные провайдеры.
+    """
+    def make_request(self, model_name, contents, system_instruction):
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            # Необязательные заголовки атрибуции OpenRouter (не влияют на работу,
+            # используются лишь для рейтинга приложения на openrouter.ai).
+            "HTTP-Referer": "https://github.com/job-hunter-ai",
+            "X-Title": "Job Hunter AI",
+        }
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": contents}
+            ],
+            "temperature": 0.1
+        }
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+
+        with urllib.request.urlopen(req, timeout=self.request_timeout) as response:
+            res_data = json.loads(response.read().decode("utf-8"))
+            choices = res_data.get('choices', [])
+            if not choices:
+                raise AIResponseParseError("OpenRouter вернул пустой список вариантов.")
+            message = choices[0].get('message', {})
+            text = (message.get('content') or "").strip()
+            if not text:
+                raise AIResponseParseError("OpenRouter вернул пустой текст ответа.")
+            return text
+
+
 class LMStudioProvider(BaseProvider):
     """
     Локальный провайдер LM Studio (OpenAI-совместимый API на порту 1234).
@@ -446,7 +574,7 @@ class OllamaProvider(BaseProvider):
                 if models:
                     return models[0].get("name", "local-model")
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
         raise AIEngineError(
             "В Ollama нет загруженных моделей. Установите модель командой: ollama pull <model_name>"
         )
@@ -496,6 +624,7 @@ def get_provider(provider_name, api_key, model_pool, base_url=None):
         "OpenAI": OpenAIProvider,
         "Anthropic": AnthropicProvider,
         "DeepSeek": DeepSeekProvider,
+        "OpenRouter": OpenRouterProvider,
         "Ollama": OllamaProvider,
         "LM Studio": LMStudioProvider
     }
@@ -542,7 +671,7 @@ def check_local_server(provider_name, base_url=None, timeout=2.0):
     except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
         return False, "Локальный сервер не запущен. Проверьте Ollama / LM Studio."
     except Exception as e:
-        print(f"[ИИ-Движок]: Непредвиденная ошибка проверки локального сервера ({type(e).__name__}): {e}")
+        logger.error(f"[ИИ-Движок]: Непредвиденная ошибка проверки локального сервера ({type(e).__name__}): {e}")
         return False, "Не удалось проверить локальный сервер."
 
 
@@ -653,6 +782,14 @@ def extract_relevant_context(raw_text: str, max_chars: int) -> str:
     # Step 3: paragraph split (paragraph = block separated by double newline)
     raw_paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
 
+    # Fallback split: a Ctrl+A DOM capture frequently has only single "\n"
+    # separators, collapsing the entire page into one huge block. Without
+    # granularity, a block larger than max_chars would be skipped whole and the
+    # function would return "" — leaving the LLM with no vacancy text. Re-split
+    # on single newlines so scoring/packing has selectable units to work with.
+    if len(raw_paragraphs) <= 1:
+        raw_paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+
     # Step 4: score each paragraph, retaining its original positional index
     def _score(para: str) -> float:
         hits = len(_VACANCY_KW_RE.findall(para))
@@ -679,7 +816,17 @@ def extract_relevant_context(raw_text: str, max_chars: int) -> str:
     selected_items.sort(key=lambda x: x[0])
 
     # Step 7: pack with a hard budget guarantee
-    return pack_paragraphs_to_budget([p for _, p in selected_items], max_chars)
+    result = pack_paragraphs_to_budget([p for _, p in selected_items], max_chars)
+
+    # Guarantee non-empty output for any non-empty page. If scoring/packing
+    # selected nothing (e.g. one oversized unsplittable block), hard-truncate
+    # the cleaned text to the budget so the LLM always receives vacancy content
+    # rather than an empty prompt.
+    if not result:
+        fallback = (text or raw_text).strip()
+        if fallback:
+            return fallback[:max_chars]
+    return result
 
 
 def distill_resume(raw_text, config):
@@ -797,44 +944,17 @@ def analyze_and_generate(vacancy, config, cancel_event=None):
                           "ru": "Вакансия требует присутствия в регионе, не совпадающем с вашей локацией."},
         "fmt_unknown":   {"en": "Work format not specified; strict mode requires explicit format.",
                           "ru": "Формат работы не указан; строгий режим требует явного формата."},
+        "fmt_mismatch":  {"en": "Vacancy offers a work format excluded by your strict-mode settings.",
+                          "ru": "Вакансия предлагает формат работы, исключённый настройками строгого режима."},
+        "country_mismatch": {"en": "Vacancy country does not match your target country.",
+                          "ru": "Страна вакансии не совпадает с целевой страной."},
     }
 
     def _reason(key):
         return _REJECT[key].get(language, _REJECT[key]["en"])
 
-    _GEO_ALIASES = {
-        # English abbreviations
-        "us": "united states", "usa": "united states", "u.s.": "united states",
-        "u.s.a.": "united states", "america": "united states",
-        "uk": "united kingdom", "u.k.": "united kingdom", "gb": "united kingdom",
-        "great britain": "united kingdom", "britain": "united kingdom",
-        "uae": "united arab emirates",
-        "ksa": "saudi arabia",
-        # Russian-language user input
-        "сша": "united states", "великобритания": "united kingdom",
-        "рф": "russia", "россия": "russia", "российская федерация": "russia",
-        "беларусь": "belarus", "украина": "ukraine",
-        "германия": "germany", "австрия": "austria", "швейцария": "switzerland",
-        "польша": "poland", "чехия": "czech republic", "словакия": "slovakia",
-        "нидерланды": "netherlands", "голландия": "netherlands",
-        "испания": "spain", "франция": "france", "италия": "italy",
-        "швеция": "sweden", "норвегия": "norway", "дания": "denmark",
-        "финляндия": "finland", "канада": "canada", "австралия": "australia",
-        "малайзия": "malaysia", "вьетнам": "vietnam", "япония": "japan",
-        "китай": "china", "индия": "india",
-    }
-
-    def _normalize_geo(name: str) -> str:
-        n = name.lower().strip()
-        return _GEO_ALIASES.get(n, n)
-
-    def _geo_match(user_loc: str, regions: list) -> bool:
-        u = _normalize_geo(user_loc)
-        for r in regions:
-            r_n = _normalize_geo(str(r))
-            if u and r_n and (u in r_n or r_n in u):
-                return True
-        return False
+    # Geo helpers (_GEO_ALIASES, _normalize_geo, _geo_match) are now module-level
+    # so they are unit-testable and shared. See top of this module.
 
     strictness = config.get("filter_strictness", 2)
 
@@ -907,79 +1027,212 @@ def analyze_and_generate(vacancy, config, cancel_event=None):
         "=== EVALUATION MODE: STRICT ===\n"
         "Quality over quantity — filter aggressively.\n"
         "Reject if ANY hard criterion (1–3) is met, OR if TWO OR MORE soft red flags from criterion 4 are present,\n"
-        "OR if criterion 5 applies (when included).\n"
+        "OR if criterion 5 applies (when included), OR if criterion 6 (scope inflation / implied overtime) applies.\n"
         "Do NOT give benefit of the doubt on ambiguous quality signals. WHEN IN DOUBT → REJECT.\n"
         "Exception: criterion 5 carries its own doubt rule — see that section.\n\n"
     )
-    _s1_stack_seniority = (
-        "=== REJECTION CRITERION 5: PROFESSIONAL DOMAIN AND SENIORITY MISMATCH ===\n"
-        "Active only in strict mode when a candidate resume with real work experience is provided.\n"
-        "Two independent sub-checks — either alone is sufficient to reject.\n\n"
-
-        "— PART A: CORE PROFESSIONAL DOMAIN INCOMPATIBILITY —\n"
-        "Purpose: catch vacancies whose required expertise is fundamentally outside the candidate's\n"
-        "professional background — not merely a different specialisation within the same field.\n\n"
-        "PROCESS:\n"
-        "  1. From the resume, identify the candidate's PRIMARY professional function\n"
-        "     (e.g. sales, software development, marketing, accounting, design, HR, logistics, medicine)\n"
-        "     and their SPECIFIC DOMAIN within it\n"
-        "     (e.g. B2C furniture retail, Python backend, digital marketing, tax accounting).\n"
-        "  2. Identify the PRIMARY competency the vacancy requires.\n"
-        "  3. Reject ONLY if the required competency is FUNDAMENTALLY different from the candidate's\n"
-        "     background AND the candidate's resume contains no bridge experience that could qualify them.\n\n"
-        "REJECT — clear domain gaps (these are examples of the principle, not an exhaustive list):\n"
-        "  • Furniture showroom sales manager → enterprise B2B SaaS sales requiring SaaS-specific experience.\n"
-        "    (Retail B2C vs. enterprise software procurement: different expertise, different sales motion.)\n"
-        "  • Python developer → Java developer where Java is a hard non-negotiable requirement and not in resume.\n"
-        "    (Primary language absent; Python and Java are not directly transferable runtimes.)\n"
-        "  • Graphic designer → financial auditor. (Completely different professional functions.)\n"
-        "  • Marketing specialist → civil engineer. (No transferable domain expertise.)\n\n"
-        "PASS — related domains must never be rejected:\n"
-        "  • Kitchen furniture sales → wardrobe / bedroom / bathroom / home goods sales.\n"
-        "    (Same professional function, adjacent product domain — core skills transfer directly.)\n"
-        "  • B2C retail sales → B2B sales (when the vacancy does not require deep domain-specific expertise).\n"
-        "  • Python backend developer → FastAPI / Django / Flask / async Python vacancy.\n"
-        "    (Same language, same ecosystem — framework differences are not a domain gap.)\n"
-        "  • Java developer → Kotlin developer. (Same JVM ecosystem, highly transferable.)\n"
-        "  • Digital marketing specialist → SMM / PPC / content marketing / SEO.\n"
-        "    (Same function, different channel — core competency is the same.)\n"
-        "  • Accountant → bookkeeper / financial analyst / payroll specialist. (Adjacent finance roles.)\n"
-        "  • HR generalist → recruiter / talent acquisition. (Same HR function, narrower specialisation.)\n"
-        "  • Any vacancy in the same broad professional field where core skills clearly apply → PASS.\n\n"
-        "NEVER reject for mismatches on support tools regardless of profession:\n"
-        "databases (SQL, PostgreSQL, MySQL, MongoDB), cloud platforms (AWS, GCP, Azure),\n"
-        "DevOps / infra tools (Docker, Kubernetes, CI/CD, Git, Linux), project methodologies (Agile, Scrum, PMP).\n"
-        "These are supporting skills, not professional domains. Their absence is never a rejection reason.\n\n"
-        "ANY DOUBT about whether the domains are compatible → do NOT reject under Part A.\n"
-        "Err strongly on the side of the candidate. False positives cost real job opportunities.\n\n"
-
-        "— PART B: SENIORITY LEVEL MISMATCH —\n"
-        "Applies universally across all professions.\n"
-        "Reject if ALL THREE of the following are simultaneously true:\n"
-        "  1. The candidate is CLEARLY JUNIOR: 0–2 years of commercial experience\n"
-        "     AND no senior, lead, principal, or staff titles anywhere in the resume.\n"
-        "  2. The vacancy EXPLICITLY requires SENIOR, LEAD, PRINCIPAL, or STAFF level.\n"
-        "  3. The vacancy states a minimum required experience of 4 or more years.\n\n"
+    _s1_scope_inflation = (
+        "=== REJECTION CRITERION 6: IMPLIED OVERTIME VIA SCOPE INFLATION ('ONE-MAN-BAND' RED FLAG) ===\n"
+        "Strict mode only. Active even when the vacancy states NO explicit hours, overtime, or on-call terms.\n"
+        "APPLIES TO ALL PROFESSIONS — this is not an engineering-only check. The same logic applies equally\n"
+        "to sales, marketing, HR, accounting, admin/office, retail, medicine, logistics, design, or any field.\n\n"
+        "Purpose: catch vacancies where the required scope is so broad that fulfilling it single-handedly\n"
+        "implies an unsustainable workload — an obvious practical consequence of the stated scope, even though\n"
+        "the posting never uses exploitation language or states a numeric hours figure.\n\n"
+        "THIS IS A DELIBERATE, NARROW EXCEPTION to Criterion 3's 'never infer hours from vague language' rule:\n"
+        "the scope itself is explicit text in the posting; the workload consequence is a direct, mechanical\n"
+        "implication of that explicit scope (one person cannot simultaneously own N full disciplines at once),\n"
+        "not a guess extrapolated from vague or emotive language.\n\n"
+        "PROCESS (profession-agnostic):\n"
+        "  1. Identify the vacancy's PRIMARY professional field (same identification already done for\n"
+        "     Criterion 5 — sales, engineering, marketing, HR, accounting, admin, medicine, logistics, etc.).\n"
+        "  2. Within that field's normal organizational context, identify how many DISTINCT FUNCTIONS the\n"
+        "     vacancy requires full OWNERSHIP of. A 'distinct function' is one that, in a normally-staffed\n"
+        "     organization of comparable size, would be its own role, job title, or department — regardless\n"
+        "     of which profession it belongs to.\n"
+        "  3. If 3 or more distinct functions are required as CORE ownership duties for one person, with no\n"
+        "     team/support mentioned, this is the trigger condition (see REJECT conditions below).\n\n"
+        "ILLUSTRATIVE DISTINCT-FUNCTION EXAMPLES BY FIELD (non-exhaustive — apply the same reasoning to any\n"
+        "profession not listed here):\n"
+        "  • Engineering/IT: backend dev, frontend dev, DevOps/infra, data eng./ML, QA, product/PM, design,\n"
+        "    security engineering.\n"
+        "  • Marketing: SMM, paid ads (PPC), content/copywriting, email marketing, analytics/BI, graphic\n"
+        "    design, PR/communications, event management.\n"
+        "  • Sales: direct sales, account/CRM management, marketing, logistics/fulfillment, bookkeeping,\n"
+        "    customer support.\n"
+        "  • HR: recruiting, payroll administration, legal/compliance, learning & development, office\n"
+        "    management, employer branding.\n"
+        "  • Accounting/Finance: bookkeeping, tax reporting, payroll, financial planning/analysis, legal\n"
+        "    compliance, treasury/cash management.\n"
+        "  • Admin/Office management: reception/front-desk, accounting, procurement, HR administration,\n"
+        "    IT support, facilities management.\n"
+        "  • Retail/Store management: sales floor, inventory/merchandising, accounting, marketing, HR/staff\n"
+        "    scheduling, loss prevention.\n"
+        "  • Medicine/Clinic: clinical care, administrative scheduling, billing/insurance processing,\n"
+        "    compliance/regulatory, office management.\n"
+        "  • Logistics: dispatch/routing, warehouse management, procurement, customer service, accounting.\n\n"
+        "REJECT when ALL of the following hold:\n"
+        "  1. The vacancy lists ownership responsibilities spanning 3+ distinct functions (per the PROCESS\n"
+        "     above) as CORE duties for one person — not framed as 'nice to have', 'a plus', or 'basic\n"
+        "     familiarity with'.\n"
+        "  2. No team, no colleagues in adjacent functions, and no mention of a hiring pipeline for\n"
+        "     supporting roles anywhere in the text — nothing suggests the candidate is one of several\n"
+        "     specialists or has any support staff.\n"
+        "  3. The role is not explicitly and adequately compensated for that breadth: no Head/Lead/Director/\n"
+        "     C-level-type title paired with equity or explicitly above-market compensation, and no explicit\n"
+        "     statement that this is a time-boxed early-stage/startup bootstrapping phase chosen willingly by\n"
+        "     the candidate.\n\n"
         "Do NOT reject when:\n"
-        "  • The candidate is MIDDLE level (roughly 2–5 years of commercial experience).\n"
-        "    Middle candidates may freely apply to senior-labelled roles — do not block them.\n"
-        "  • The vacancy title says 'Senior' but the requirement body describes middle-level tasks or ≤3 years.\n"
-        "  • The required level is expressed as a range: 'Middle/Senior', 'Middle+', '3–6 years', etc.\n"
-        "  • The candidate's experience level is ambiguous or unclear in the resume.\n"
-        "    When in doubt about seniority → do NOT reject under Part B.\n\n"
-
-        "reject_reason for Part A: state which domain expertise is required and why the candidate's\n"
-        "background does not cover it (be specific — name the domain, not just 'mismatch').\n"
-        "reject_reason for Part B: state the required seniority level and the candidate's evident level.\n\n"
+        "  • Only 2 adjacent functions overlap (e.g., sales + basic CRM upkeep is a normal expectation in\n"
+        "    that field; backend + DevOps is a normal 'full-stack-ish' expectation in engineering).\n"
+        "  • Overlapping duties are described as 'familiarity with' / 'nice to have' / 'a plus', not core\n"
+        "    ownership duties.\n"
+        "  • A team or supporting roles are mentioned anywhere ('you will work with our design team',\n"
+        "    'alongside our accountant', 'reports to the Head of Sales').\n"
+        "  • The title itself is Head/Lead/Director/C-level with equity or explicitly high compensation\n"
+        "    stated — broad ownership is inherent to that seniority and is being compensated for.\n"
+        "  • This is a small business/solo-founder context where wearing multiple hats is the openly stated\n"
+        "    nature of the role itself (e.g., a solo shop owner explicitly hiring their first-ever employee\n"
+        "    and framing the breadth as shared, not delegated entirely to the candidate).\n"
+        "  • Scope breadth is ambiguous or only weakly implied — when in doubt whether 3+ functions are\n"
+        "    genuinely full ownership vs. light involvement, do NOT reject under this criterion.\n\n"
+        "reject_reason: name the 3+ overlapping functions identified and state plainly that the combined\n"
+        "scope implies an unsustainable workload for one person (e.g., 'Role requires full ownership of\n"
+        "sales, marketing, and bookkeeping with no team mentioned — implies unstated overtime / one-man-band\n"
+        "workload.').\n\n"
     )
+    def _build_stack_seniority_block(strictness_level, blocklist):
+        """
+        Строит блок REJECTION CRITERION 5 (домен + seniority + product-tier).
+
+        "Paradox of Doubt" fix: doubt-handling for Part A (Domain compatibility)
+        is assembled CONDITIONALLY based on strictness_level, instead of being a
+        single hard-coded lenient clause that contradicted STRICT evaluation mode:
+          - strictness_level == 3 → lenient "do NOT reject on doubt" qualifiers are
+            stripped entirely and replaced with a singular strict override:
+            "when in doubt, REJECT". No leniency language survives in Strict Mode.
+          - otherwise → the original lenient "err on the side of the candidate"
+            clause is used (kept for forward-compatibility / non-strict callers).
+        """
+        blocklist_str = ", ".join(blocklist)
+
+        if strictness_level == 3:
+            _domain_doubt_clause = (
+                "STRICT MODE DOUBT RULE (overrides all leniency language above — this is the ONLY "
+                "doubt rule that applies in Strict Mode):\n"
+                "In Strict Mode, any mismatch or ambiguity regarding primary business market, target scale, "
+                "or operational region must result in an immediate rejection. Strip all leniency; "
+                "when in doubt, REJECT.\n\n"
+            )
+        else:
+            _domain_doubt_clause = (
+                "ANY DOUBT about whether the domains are compatible → do NOT reject under Part A.\n"
+                "Err strongly on the side of the candidate. False positives cost real job opportunities.\n\n"
+            )
+
+        _product_tier_block = (
+            "— PRODUCT-TIER ASSESSMENT (sub-check within Part A) —\n"
+            "Purpose: catch vacancies that superficially match the candidate's professional domain\n"
+            "(e.g. both are 'software development') but require work on a product tier far BELOW the\n"
+            "candidate's demonstrated seniority — legacy busywork disguised as an engineering role.\n\n"
+            "HIGH-TIER indicators (real engineering scope — never reject on tier grounds):\n"
+            "  • Enterprise SaaS platforms, distributed systems, microservices architecture.\n"
+            "  • Complex data pipelines, ML/AI systems, high-load / high-availability infrastructure.\n"
+            "  • A real product engineering org: code review, testing, CI/CD, system design, ownership.\n\n"
+            "LOW-TIER indicators (legacy / basic-automation busywork — extra scrutiny for MID/SENIOR candidates):\n"
+            "  • The core task matches a keyword from the LOW-TIER TASK BLOCKLIST below.\n"
+            "  • The entire scope is a single disposable script, one-off spreadsheet automation, or manual\n"
+            "    data wrangling — with no system design, no architecture, no product ownership.\n"
+            "  • Zero mention of engineering process anywhere (no code review, testing, deployment, architecture).\n\n"
+            f"LOW-TIER TASK BLOCKLIST (configurable via config['low_tier_task_blocklist']): {blocklist_str}\n\n"
+            "REJECT under Product-Tier when ALL of the following hold:\n"
+            "  1. The candidate resume shows MIDDLE or SENIOR (2+ years) commercial engineering experience.\n"
+            "  2. The vacancy's core task matches one or more LOW-TIER blocklist keywords/indicators above.\n"
+            "  3. No evidence of higher-tier scope (architecture, product ownership, system design) exists\n"
+            "     elsewhere in the posting.\n"
+            "Do NOT reject a JUNIOR candidate (0–2 years) on Product-Tier grounds — low-tier tasks are\n"
+            "appropriate entry points for junior profiles.\n"
+            "Do NOT reject when the low-tier task is explicitly described as ONE COMPONENT of a larger,\n"
+            "higher-tier system (e.g. 'one microservice handles a legacy Excel import step').\n\n"
+        )
+
+        return (
+            "=== REJECTION CRITERION 5: PROFESSIONAL DOMAIN AND SENIORITY MISMATCH ===\n"
+            "Active only in strict mode when a candidate resume with real work experience is provided.\n"
+            "PART A and PART B are independent — either alone is sufficient to reject.\n"
+            "PART A itself has two independent gates — Domain Incompatibility and Product-Tier Assessment —\n"
+            "either alone is sufficient to reject under Part A.\n\n"
+
+            "— PART A: CORE PROFESSIONAL DOMAIN INCOMPATIBILITY —\n"
+            "Purpose: catch vacancies whose required expertise is fundamentally outside the candidate's\n"
+            "professional background — not merely a different specialisation within the same field.\n\n"
+            "PROCESS:\n"
+            "  1. From the resume, identify the candidate's PRIMARY professional function\n"
+            "     (e.g. sales, software development, marketing, accounting, design, HR, logistics, medicine)\n"
+            "     and their SPECIFIC DOMAIN within it\n"
+            "     (e.g. B2C furniture retail, Python backend, digital marketing, tax accounting).\n"
+            "  2. Identify the PRIMARY competency the vacancy requires.\n"
+            "  3. Reject ONLY if the required competency is FUNDAMENTALLY different from the candidate's\n"
+            "     background AND the candidate's resume contains no bridge experience that could qualify them.\n\n"
+            "REJECT — clear domain gaps (these are examples of the principle, not an exhaustive list):\n"
+            "  • Furniture showroom sales manager → enterprise B2B SaaS sales requiring SaaS-specific experience.\n"
+            "    (Retail B2C vs. enterprise software procurement: different expertise, different sales motion.)\n"
+            "  • Python developer → Java developer where Java is a hard non-negotiable requirement and not in resume.\n"
+            "    (Primary language absent; Python and Java are not directly transferable runtimes.)\n"
+            "  • Graphic designer → financial auditor. (Completely different professional functions.)\n"
+            "  • Marketing specialist → civil engineer. (No transferable domain expertise.)\n\n"
+            "PASS — related domains must never be rejected:\n"
+            "  • Kitchen furniture sales → wardrobe / bedroom / bathroom / home goods sales.\n"
+            "    (Same professional function, adjacent product domain — core skills transfer directly.)\n"
+            "  • B2C retail sales → B2B sales (when the vacancy does not require deep domain-specific expertise).\n"
+            "  • Python backend developer → FastAPI / Django / Flask / async Python vacancy.\n"
+            "    (Same language, same ecosystem — framework differences are not a domain gap.)\n"
+            "  • Java developer → Kotlin developer. (Same JVM ecosystem, highly transferable.)\n"
+            "  • Digital marketing specialist → SMM / PPC / content marketing / SEO.\n"
+            "    (Same function, different channel — core competency is the same.)\n"
+            "  • Accountant → bookkeeper / financial analyst / payroll specialist. (Adjacent finance roles.)\n"
+            "  • HR generalist → recruiter / talent acquisition. (Same HR function, narrower specialisation.)\n"
+            "  • Any vacancy in the same broad professional field where core skills clearly apply → PASS.\n\n"
+            "NEVER reject for mismatches on support tools regardless of profession:\n"
+            "databases (SQL, PostgreSQL, MySQL, MongoDB), cloud platforms (AWS, GCP, Azure),\n"
+            "DevOps / infra tools (Docker, Kubernetes, CI/CD, Git, Linux), project methodologies (Agile, Scrum, PMP).\n"
+            "These are supporting skills, not professional domains. Their absence is never a rejection reason.\n\n"
+            + _domain_doubt_clause
+            + _product_tier_block +
+
+            "— PART B: SENIORITY LEVEL MISMATCH —\n"
+            "Applies universally across all professions.\n"
+            "Reject if ALL THREE of the following are simultaneously true:\n"
+            "  1. The candidate is CLEARLY JUNIOR: 0–2 years of commercial experience\n"
+            "     AND no senior, lead, principal, or staff titles anywhere in the resume.\n"
+            "  2. The vacancy EXPLICITLY requires SENIOR, LEAD, PRINCIPAL, or STAFF level.\n"
+            "  3. The vacancy states a minimum required experience of 4 or more years.\n\n"
+            "Do NOT reject when:\n"
+            "  • The candidate is MIDDLE level (roughly 2–5 years of commercial experience).\n"
+            "    Middle candidates may freely apply to senior-labelled roles — do not block them.\n"
+            "  • The vacancy title says 'Senior' but the requirement body describes middle-level tasks or ≤3 years.\n"
+            "  • The required level is expressed as a range: 'Middle/Senior', 'Middle+', '3–6 years', etc.\n"
+            "  • The candidate's experience level is ambiguous or unclear in the resume.\n"
+            "    When in doubt about seniority → do NOT reject under Part B.\n\n"
+
+            "reject_reason for Part A (domain): state which domain expertise is required and why the\n"
+            "candidate's background does not cover it (be specific — name the domain, not just 'mismatch').\n"
+            "reject_reason for Part A (product-tier): name the specific low-tier task/keyword matched and\n"
+            "state the candidate's seniority level that makes it a mismatch.\n"
+            "reject_reason for Part B: state the required seniority level and the candidate's evident level.\n\n"
+        )
 
     if strictness == 1:
         _s1_quality_block = _s1_profession + scams_block + _s1_bias_mild
     elif strictness == 3:
-        _stack_block = _s1_stack_seniority if resume_text.strip() else ""
+        _low_tier_blocklist = config.get("low_tier_task_blocklist") or DEFAULT_LOW_TIER_TASK_BLOCKLIST
+        _stack_block = (
+            _build_stack_seniority_block(strictness, _low_tier_blocklist)
+            if resume_text.strip() else ""
+        )
         _s1_quality_block = (
             _s1_profession + scams_block + _s1_exploitation
-            + _s1_soft_flags + _stack_block + _s1_bias_strict
+            + _s1_soft_flags + _stack_block + _s1_scope_inflation + _s1_bias_strict
         )
     else:  # 2 = BALANCED (default)
         _s1_quality_block = _s1_profession + scams_block + _s1_exploitation + _s1_bias_balanced
@@ -1018,21 +1271,45 @@ def analyze_and_generate(vacancy, config, cancel_event=None):
         "Return 'worker_geo_regions' as a list of region/country names the restriction applies to.\n\n"
         "CRITICAL RULES:\n"
         "1. Explicit global-remote phrases override everything: 'из любой точки мира', 'work from anywhere worldwide', "
-        "'полностью удалённо без ограничений' → ALWAYS 'none', regions: [].\n"
-        "2. Company/office city IS NOT a worker restriction. 'Офис в Москве', 'Где предстоит работать: Москва', "
-        "'office: Berlin', 'headquarters: New York' → 'none', regions: [].\n"
+        "'полностью удалённо без ограничений' → ALWAYS 'none', regions: [] — but ONLY when 'work_formats' is "
+        "['remote'] with no office/hybrid signal anywhere (see Rule 2).\n"
+        "2. GEO-FILTER BLIND-SPOT FIX — office/hybrid presence IS a worker restriction:\n"
+        "   Company/office city is treated as NOT a worker restriction ONLY when the role is confirmed fully\n"
+        "   remote (work_formats = ['remote'] only, no office/hybrid anywhere in the text).\n"
+        "   If 'work_formats' includes 'office' or 'hybrid', OR the text otherwise implies mandatory physical\n"
+        "   presence (e.g. 'presence in the office required', 'you will work from our office at X', "
+        "'3 дня в неделю в офисе', 'частичное присутствие в офисе'), that office location DOES restrict the "
+        "worker: you MUST set 'worker_geo_restriction' = 'required_in' and 'worker_geo_regions' = [that city "
+        "or country] — do NOT default to 'none' in this case, even if the text never uses explicit phrases "
+        "like 'only from' or 'must reside in'. Physical presence is inherently a geographic restriction.\n"
+        "   Examples:\n"
+        "     'Офис в Москве' + work_formats=['remote'] only → 'none', []  (office is just the company address)\n"
+        "     'Офис в Москве' + work_formats=['office'] → 'required_in', ['Moscow']\n"
+        "     'Гибрид, офис в Берлине, 2 дня из дома' + work_formats=['hybrid'] → 'required_in', ['Berlin']\n"
         "3. Use 'required_in' ONLY when text explicitly says worker must be in X: "
-        "'только из РФ', 'only candidates from Russia', 'must reside in', 'кандидаты только из'.\n"
+        "'только из РФ', 'only candidates from Russia', 'must reside in', 'кандидаты только из' "
+        "— OR when Rule 2's office/hybrid presence condition applies.\n"
         "4. Use 'excluded_from' ONLY when text explicitly bans workers from X: "
         "'outside Russia/Belarus', 'вне РФ и РБ', 'необходимо быть вне территории РФ'.\n"
-        "5. When uncertain → 'none'. False positives cost users real job opportunities.\n\n"
+        "5. Default-on-uncertainty depends on format: for a CONFIRMED FULLY-REMOTE vacancy (work_formats = "
+        "['remote'] only, no office/hybrid signal anywhere), uncertainty → 'none' (false positives cost users "
+        "real job opportunities). But when 'work_formats' includes 'office' or 'hybrid', NEVER default to "
+        "'none' on uncertainty — apply Rule 2 and map the implied office city/country to "
+        "'worker_geo_regions' with 'worker_geo_restriction' = 'required_in'.\n\n"
         "Examples:\n"
-        "  'Полностью удалённо из любой точки мира' → 'none', []\n"
-        "  'Удалённо из любой точки (вне РФ, РБ, GMT+1–4)' → 'excluded_from', ['Russia','Belarus']\n"
-        "  'Удалённо, только из РФ или РБ' → 'required_in', ['Russia','Belarus']\n"
-        "  'Офис, Москва' → 'none', []    ← office location ≠ worker restriction\n"
-        "  'Где предстоит работать: Москва' → 'none', []    ← site field, not worker restriction\n"
-        "  'Remote' (no geo mentioned) → 'none', []\n\n"
+        "  'Полностью удалённо из любой точки мира' (work_formats=['remote']) → 'none', []\n"
+        "  'Удалённо из любой точки (вне РФ, РБ, GMT+1–4)' (work_formats=['remote']) → 'excluded_from', ['Russia','Belarus']\n"
+        "  'Удалённо, только из РФ или РБ' (work_formats=['remote']) → 'required_in', ['Russia','Belarus']\n"
+        "  'Офис, Москва' (work_formats=['office']) → 'required_in', ['Moscow']    ← office presence required = worker geo restriction\n"
+        "  'Гибрид (2 дня офис, 3 дня дома), Berlin' (work_formats=['hybrid']) → 'required_in', ['Berlin']\n"
+        "  'Где предстоит работать: Москва' (work_formats=['remote']) → 'none', []    ← site field only, no presence required\n"
+        "  'Remote' (no geo mentioned, work_formats=['remote']) → 'none', []\n\n"
+
+        "=== VACANCY COUNTRY ===\n"
+        "Return 'vacancy_country' — the country the vacancy/employer is based in "
+        "(e.g. the legal entity's country or the primary hiring country stated in the posting).\n"
+        "Return it as a plain country name (e.g. 'United States', 'Germany', 'Russia').\n"
+        "Use an empty string \"\" if the country cannot be reliably determined from the text.\n\n"
 
         f"LANGUAGE: Write 'reject_reason', 'extracted_title', 'extracted_company' in {lang_name}.\n"
         "RESPONSE: raw JSON only — no markdown, no code blocks, no explanations.\n"
@@ -1043,7 +1320,8 @@ def analyze_and_generate(vacancy, config, cancel_event=None):
         f'  "extracted_company": "string — clean company name",\n'
         f'  "work_formats": ["remote" | "office" | "hybrid" | "unknown"],\n'
         f'  "worker_geo_restriction": "none" | "required_in" | "excluded_from",\n'
-        f'  "worker_geo_regions": ["list", "of", "region", "names"]\n'
+        f'  "worker_geo_regions": ["list", "of", "region", "names"],\n'
+        f'  "vacancy_country": "string — country the vacancy is based in, or empty string if unknown"\n'
         "}"
     )
     
@@ -1059,11 +1337,25 @@ def analyze_and_generate(vacancy, config, cancel_event=None):
         # Гарантируем наличие всех ключей
         extracted_title = result_json.get("extracted_title", raw_title)
         extracted_company = result_json.get("extracted_company", "Не указана")
-        extracted_data = {"title": extracted_title, "company": extracted_company}
+        extracted_vacancy_country = (result_json.get("vacancy_country") or "").strip()
+        extracted_data = {
+            "title": extracted_title,
+            "company": extracted_company,
+            "vacancy_country": extracted_vacancy_country,
+        }
 
         # Если вакансия заблокирована ИИ по критериям адекватности
         if not result_json.get("is_relevant_profession", True):
             return "REJECTED", result_json.get("reject_reason", "Не прошло фильтр качества вакансий"), extracted_data
+
+        # ── HARD GATE: target country vs. extracted vacancy country ──────────
+        # Both sides must be non-empty to apply the gate — an unset target
+        # country or an undeterminable vacancy country never triggers a
+        # rejection (avoids false positives from missing data).
+        target_country = (config.get("target_country") or "").strip()
+        if target_country and extracted_vacancy_country:
+            if target_country.lower() != extracted_vacancy_country.lower():
+                return "REJECTED", _reason("country_mismatch"), extracted_data
 
         # Parse work formats list (with fallback for old string field)
         raw_formats = result_json.get("work_formats", result_json.get("work_format", "unknown"))
@@ -1079,11 +1371,27 @@ def analyze_and_generate(vacancy, config, cancel_event=None):
 
         if (f_remote or f_office or f_hybrid):
             if work_formats:
-                # Known formats returned — check intersection
                 enabled = set()
                 if f_remote: enabled.add("remote")
                 if f_office: enabled.add("office")
                 if f_hybrid: enabled.add("hybrid")
+
+                if strictness == 3:
+                    # MAX STRICTNESS — exclusion paradigm, not inclusion.
+                    # BUG FIXED: previously a vacancy offering e.g.
+                    # ["remote", "office"] would PASS for a remote-only user
+                    # just because "remote" intersected `enabled` — silently
+                    # bypassing the strict filter by also tolerating office.
+                    # At strictness 3 we instead hard-reject the moment the
+                    # vacancy lists ANY forbidden format, regardless of
+                    # whether an allowed format is also present.
+                    forbidden = {'office', 'hybrid'} - enabled
+                    if work_formats & forbidden and not f_hybrid:
+                        return "REJECTED", _reason("fmt_mismatch"), extracted_data
+
+                # Inclusive intersection check: at least one enabled format
+                # must be present. Sole gate for strictness 1–2; also acts as
+                # a baseline "nothing allowed matched" guard at strictness 3.
                 if not (work_formats & enabled):
                     for fmt in ("remote", "hybrid", "office"):
                         if fmt in work_formats:
@@ -1122,13 +1430,13 @@ def analyze_and_generate(vacancy, config, cancel_event=None):
     except AIEngineError as e:
         return "ERROR", f"Сбой каскада ИИ на Stage 1: {e.detail}", {}
     except Exception as e:
-        print(f"[ИИ-Движок]: Непредвиденный сбой Stage 1 ({type(e).__name__}): {e}")
+        logger.error(f"[ИИ-Движок]: Непредвиденный сбой Stage 1 ({type(e).__name__}): {e}")
         return "ERROR", f"Непредвиденный сбой на Stage 1: {type(e).__name__}: {e}", {}
 
     # Cancellation check: if STOP was pressed while Stage 1 was running, abort
     # now rather than starting the more expensive Stage 2 generation call.
     if cancel_event is not None and cancel_event.is_set():
-        print("[ИИ-Движок]: Cancelled between Stage 1 and Stage 2.")
+        logger.info("[ИИ-Движок]: Cancelled between Stage 1 and Stage 2.")
         return "ERROR", "cancelled", extracted_data
 
     # Запускаем Stage 2: генерация сопроводительного письма
@@ -1187,5 +1495,5 @@ def analyze_and_generate(vacancy, config, cancel_event=None):
     except AIEngineError as e:
         return "ERROR", f"Сбой каскада ИИ на Stage 2: {e.detail}", extracted_data
     except Exception as e:
-        print(f"[ИИ-Движок]: Непредвиденный сбой Stage 2 ({type(e).__name__}): {e}")
-        return "ERROR", f"Непредвиденный сбой на Stage 2: {type(e).__name__}: {e}", extracted_data
+        logger.error(f"[ИИ-Движок]: Непредвиденный сбой Stage 2 ({type(e).__name__}): {e}")
+        return "ERROR", f"Непредвиденный сбой на Stage 2: {type(e).__name__}: {e}", extracted_data

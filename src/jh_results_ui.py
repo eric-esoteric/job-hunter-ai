@@ -2,14 +2,18 @@
 import os
 import sys
 import threading
-import webbrowser
 import customtkinter as ctk
 import jh_storage_manager as storage_manager
 import jh_i18n
+import jh_url_utils
+import jh_notifications
 from jh_i18n import tr
 from tkinter import messagebox
 
 from PIL import Image
+from jh_log import get_logger
+
+logger = get_logger(__name__)
 
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 _ROOT_DIR = os.path.dirname(BASE_DIR)
@@ -93,7 +97,7 @@ def force_dark_title_bar(window):
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(ctypes.c_int(1)), 4)
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(ctypes.c_int(1)), 4)
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
 def _show_with_icon(window, width, height, parent=None, grab=False):
     """
@@ -106,7 +110,7 @@ def _show_with_icon(window, width, height, parent=None, grab=False):
     try:
         window.attributes("-alpha", 0.0)
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
     try:
         window.update_idletasks()
         try:
@@ -145,7 +149,7 @@ def _show_with_icon(window, width, height, parent=None, grab=False):
         try:
             window.iconbitmap(ICON_PATH)
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
         try:
             import ctypes
             # GA_ROOT(2) поднимается по цепочке родителей до корневого окна —
@@ -166,7 +170,7 @@ def _show_with_icon(window, width, height, parent=None, grab=False):
             if icon_small:
                 ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 0, icon_small)
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
     def _finalize():
         if not window.winfo_exists():
@@ -175,7 +179,7 @@ def _show_with_icon(window, width, height, parent=None, grab=False):
         try:
             window.attributes("-alpha", 1.0)
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
         # Повторное применение на случай если CTk сбросил иконку в своих after()-коллбэках
         window.after(350, _apply_icon)
 
@@ -194,7 +198,7 @@ def center_window(window, width, height, parent=None):
     try:
         window.attributes("-alpha", 0.0)
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
     def _apply_centered_position():
         if not window.winfo_exists():
@@ -226,14 +230,14 @@ def center_window(window, width, height, parent=None):
             # width/height — логические (CTk умножит на sc); x/y — физические (CTk не трогает)
             window.geometry(f"{width}x{height}+{max(0, x)}+{max(0, y)}")
         except Exception as e:
-            print(f"[Резервное центрирование]: {e}")
+            logger.warning(f"[Резервное центрирование]: {e}")
             window.geometry(f"{width}x{height}")
         finally:
             try:
                 window.attributes("-alpha", 1.0)
                 window.deiconify()
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
     window.after(15, _apply_centered_position)
 
@@ -260,10 +264,10 @@ def bind_russian_hotkeys(widget):
                         if event.widget.selection_present():
                             event.widget.delete("sel.first", "sel.last")
                     except Exception:
-                        pass
+                        logger.debug("Suppressed exception", exc_info=True)
                 event.widget.insert("insert", text)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             return "break"
             
         elif keycode == 67 or key in ('c', 'cyrillic_es'):
@@ -275,12 +279,12 @@ def bind_russian_hotkeys(widget):
                     try:
                         selected_text = event.widget.selection_get()
                     except Exception:
-                        pass
+                        logger.debug("Suppressed exception", exc_info=True)
                 if selected_text:
                     event.widget.clipboard_clear()
                     event.widget.clipboard_append(selected_text)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             return "break"
             
         elif keycode == 65 or key in ('a', 'cyrillic_ef'):
@@ -292,7 +296,7 @@ def bind_russian_hotkeys(widget):
                     event.widget.select_range(0, "end")
                     event.widget.icursor("end")
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             return "break"
             
         elif keycode == 88 or key in ('x', 'cyrillic_che'):
@@ -312,15 +316,15 @@ def bind_russian_hotkeys(widget):
                             event.widget.clipboard_append(selected_text)
                             event.widget.delete("sel.first", "sel.last")
                     except Exception:
-                        pass
+                        logger.debug("Suppressed exception", exc_info=True)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             return "break"
 
     try:
         target.bind("<Control-KeyPress>", handle_control_keys)
     except Exception as e:
-        print(f"[Ошибка привязки клавиш]: {e}")
+        logger.error(f"[Ошибка привязки клавиш]: {e}")
 
 def speed_up_scroll_frame(scroll_frame, speed_multiplier=3):
     """Оптимизирует скорость прокрутки колесиком мыши для CTkScrollableFrame."""
@@ -343,23 +347,33 @@ def speed_up_scroll_frame(scroll_frame, speed_multiplier=3):
                 
                 canvas.yview_scroll(delta, "units")
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             return "break"
             
         canvas.bind("<MouseWheel>", _on_mousewheel, add="+")
         scroll_frame._container.bind("<MouseWheel>", _on_mousewheel, add="+")
     except Exception as e:
-        print(f"[Scroll Speedup Failed]: {e}")
+        logger.error(f"[Scroll Speedup Failed]: {e}")
 
-def open_browser_link(url):
-    """Безопасно открывает ссылку в браузере по умолчанию"""
-    if url and url != "#":
-        try:
-            webbrowser.open(url)
-        except Exception as e:
-            messagebox.showerror("Error", tr("link_error", e=e))
-    else:
-        messagebox.showinfo("Info", tr("no_link"))
+def open_browser_link(url, parent=None):
+    """
+    Валидирует ссылку через jh_url_utils.safely_open_url() и только затем
+    открывает её в браузере по умолчанию.
+
+    webbrowser.open() никогда не вызывается напрямую с "сырым" url —
+    невалидные, относительные ссылки или произвольные URI-схемы (custom
+    protocol handlers) блокируются до того, как дойдут до ОС. При отказе
+    показывается стилизованный in-app toast вместо системного диалога.
+    """
+    ok, reason = jh_url_utils.safely_open_url(url)
+    if ok:
+        return
+
+    jh_notifications.send_notification(
+        tr("invalid_link_title"),
+        tr("invalid_link_body", reason=reason),
+        root=parent,
+    )
 
 
 def _run_async(window, work_fn, done_fn):
@@ -389,13 +403,13 @@ def _run_async(window, work_fn, done_fn):
         try:
             result = work_fn()
         except Exception as e:
-            print(f"[Results UI]: Background storage operation failed: {e}")
+            logger.error(f"[Results UI]: Background storage operation failed: {e}")
             result = None
         try:
             if window.winfo_exists():
                 window.after(0, lambda: done_fn(result))
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
     threading.Thread(target=_worker, daemon=True).start()
 
 
@@ -508,7 +522,7 @@ def open_window(parent_window):
             try:
                 window.after_cancel(_monitor_timer[0])
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
         window.destroy()
 
     window.protocol("WM_DELETE_WINDOW", _on_results_close)
@@ -568,7 +582,7 @@ def open_window(parent_window):
             try:
                 scroll_frame_approved._parent_canvas.yview_moveto(0)
             except Exception as e:
-                print(f"[Results UI]: yview_moveto (approved) пропущен: {e}")
+                logger.warning(f"[Results UI]: yview_moveto (approved) пропущен: {e}")
         else:
             window.current_tab = "REJECTED"
             scroll_frame_approved.pack_forget()
@@ -576,7 +590,7 @@ def open_window(parent_window):
             try:
                 scroll_frame_rejected._parent_canvas.yview_moveto(0)
             except Exception as e:
-                print(f"[Results UI]: yview_moveto (rejected) пропущен: {e}")
+                logger.warning(f"[Results UI]: yview_moveto (rejected) пропущен: {e}")
 
         _load_and_apply(force=False)
 
@@ -656,7 +670,7 @@ def open_window(parent_window):
             fg_color=COLOR_CYAN_NEON, hover_color=COLOR_CYAN_HOVER,
             text_color=COLOR_BG_DARK, font=("Arial", 12, "bold"),
             corner_radius=CORNER_RADIUS, border_width=0,
-            command=lambda: open_browser_link(url)
+            command=lambda: open_browser_link(url, window)
         )
         btn_apply.grid(row=0, column=1, padx=3)
 
@@ -703,7 +717,7 @@ def open_window(parent_window):
             text_color=COLOR_BG_DARK,
             font=("Arial", 11, "bold"),
             border_width=0,
-            command=lambda: open_browser_link(url)
+            command=lambda: open_browser_link(url, window)
         )
         btn_anyway.pack(side="left", padx=5)
 
@@ -768,7 +782,7 @@ def open_window(parent_window):
                 try:
                     entry["card"].destroy()
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 changed = True
 
         # 2. Добавляем новые и обновляем изменившиеся.
@@ -786,7 +800,7 @@ def open_window(parent_window):
                 try:
                     existing["card"].destroy()
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 card = builder(scroll_frame, item)
                 registry[url] = {"card": card, "sig": sig}
                 changed = True
@@ -802,7 +816,7 @@ def open_window(parent_window):
                 try:
                     window.approved_empty_lbl.destroy()
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 window.approved_empty_lbl = None
         else:
             if not registry and window.rejected_empty_lbl is None:
@@ -814,7 +828,7 @@ def open_window(parent_window):
                 try:
                     window.rejected_empty_lbl.destroy()
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 window.rejected_empty_lbl = None
 
         return changed
@@ -838,7 +852,7 @@ def open_window(parent_window):
             btn_clear_all.configure(state=desired_state)
             window.last_clear_btn_state = desired_state
         except Exception as e:
-            print(f"[Results UI]: Не удалось обновить состояние кнопки очистки: {e}")
+            logger.error(f"[Results UI]: Не удалось обновить состояние кнопки очистки: {e}")
 
     def update_tab_labels(approved, rejected):
         """
@@ -864,7 +878,7 @@ def open_window(parent_window):
                 # т.к. внутренний выбор мог слететь при пересборке.
                 window.last_tab_selected = None
             except Exception as e:
-                print(f"[Results UI]: Не удалось обновить подписи вкладок: {e}")
+                logger.error(f"[Results UI]: Не удалось обновить подписи вкладок: {e}")
 
         # Устанавливаем выбранный сегмент только если он реально изменился.
         if selected != window.last_tab_selected:
@@ -872,7 +886,7 @@ def open_window(parent_window):
                 tab_segment.set(selected)
                 window.last_tab_selected = selected
             except Exception as e:
-                print(f"[Results UI]: Не удалось установить активную вкладку: {e}")
+                logger.error(f"[Results UI]: Не удалось установить активную вкладку: {e}")
 
     def _dedup_by_url(items):
         """Оставляет только первую запись для каждого URL — устраняет дубли в БД."""
@@ -904,7 +918,7 @@ def open_window(parent_window):
         if _preloaded is not None:
             approved, rejected = _preloaded
         else:
-            print("[Results UI]: refresh_list() called without _preloaded — "
+            logger.warning("[Results UI]: refresh_list() called without _preloaded — "
                   "this would block the UI thread on file I/O. Skipping.")
             return
 
@@ -926,7 +940,7 @@ def open_window(parent_window):
                 text=f"✓ {n_a}  ✕ {n_r}  ◑ {rate_str} rate  │  session +{sess_a} / ✕{sess_r}"
             )
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
         # ----------------------------------------------------------------------
 
         approved_changed = (len(approved) != window.last_approved_count)
@@ -958,7 +972,7 @@ def open_window(parent_window):
                 a = _dedup_by_url(storage_manager.get_all_approved())
                 r = _dedup_by_url(storage_manager.get_all_rejected())
             except Exception as e:
-                print(f"[Ошибка чтения БД]: {e}")
+                logger.error(f"[Ошибка чтения БД]: {e}")
                 a, r = [], []
             return (a, r)
 
@@ -1053,4 +1067,4 @@ def show_letter_window(parent, title, company, cover_letter):
     )
     btn_copy.pack(pady=15)
 
-    top.after(120, lambda: _show_with_icon(top, 640, 600, parent, grab=False))
+    top.after(120, lambda: _show_with_icon(top, 640, 600, parent, grab=False))

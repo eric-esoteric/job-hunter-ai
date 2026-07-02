@@ -54,6 +54,9 @@ import threading
 import platform
 import subprocess
 from dataclasses import dataclass
+from jh_log import get_logger
+
+logger = get_logger(__name__)
 
 try:
     import pyperclip
@@ -119,7 +122,7 @@ def _key_set(*attr_names: str) -> frozenset:
         try:
             result.add(getattr(_pynput_keyboard.Key, name))
         except AttributeError:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
     return frozenset(result)
 
 _CTRL_KEYS  = _key_set("ctrl", "ctrl_l", "ctrl_r")
@@ -177,7 +180,7 @@ class HotkeySpec:
         k = self.key.upper()
         self.key = k[0] if k and k[0].isalpha() else "X"
         if self.mod1 == "none" and self.mod2 == "none":
-            print(
+            logger.warning(
                 f"[HotkeySpec]: Unsafe config — both modifiers are 'none' for key "
                 f"'{self.key}'. Registering a bare-letter hotkey would globally hijack "
                 "that key system-wide. Auto-correcting to Ctrl+Alt."
@@ -374,14 +377,14 @@ class _Win32HotkeyThread(threading.Thread):
 
         if not registered:
             err = ctypes.windll.kernel32.GetLastError()
-            print(
+            logger.error(
                 f"[Win32Hotkey]: RegisterHotKey failed (error {err}). "
                 "The key combination may already be claimed by another application. "
                 "Change the capture hotkey in Settings."
             )
             return
 
-        print(
+        logger.info(
             f"[Win32Hotkey]: Registered — VK=0x{self._vk:02X}, "
             f"mods=0x{self._mod_flags & ~self._MOD_NOREPEAT:02X}"
         )
@@ -392,10 +395,10 @@ class _Win32HotkeyThread(threading.Thread):
                 try:
                     self._callback()
                 except Exception as exc:
-                    print(f"[Win32Hotkey]: Callback raised: {exc}")
+                    logger.error(f"[Win32Hotkey]: Callback raised: {exc}")
 
         ctypes.windll.user32.UnregisterHotKey(None, self._HOTKEY_ID)
-        print("[Win32Hotkey]: Hotkey unregistered, message loop exited cleanly.")
+        logger.info("[Win32Hotkey]: Hotkey unregistered, message loop exited cleanly.")
 
     def stop(self) -> None:
         """Post WM_QUIT to the message loop thread and block until it exits."""
@@ -448,7 +451,7 @@ class _PynputHotkeyEngine:
             try:
                 self._callback()
             except Exception as exc:
-                print(f"[PynputHotkey]: Callback raised: {exc}")
+                logger.error(f"[PynputHotkey]: Callback raised: {exc}")
 
     def _on_release(self, key: object) -> None:
         mod = _mod_name_for_key(key)
@@ -464,7 +467,7 @@ class _PynputHotkeyEngine:
             daemon=True,
         )
         self._listener.start()
-        print(f"[PynputHotkey]: Listener started for VK=0x{self._target_vk:02X}")
+        logger.info(f"[PynputHotkey]: Listener started for VK=0x{self._target_vk:02X}")
 
     def stop(self) -> None:
         if self._listener is not None:
@@ -472,7 +475,7 @@ class _PynputHotkeyEngine:
                 self._listener.stop()
                 self._listener.join(timeout=0.5)
             except Exception as exc:
-                print(f"[PynputHotkey]: Stop error: {exc}")
+                logger.error(f"[PynputHotkey]: Stop error: {exc}")
             self._listener = None
         self._mods_pressed.clear()
         self._main_fired = False
@@ -606,7 +609,7 @@ def _clipboard_write(text: str, retries: int = 3) -> bool:
             if attempt < retries - 1:
                 time.sleep(0.05)
             else:
-                print(
+                logger.error(
                     f"[Automation]: Clipboard write failed after {retries} attempts: {exc}"
                 )
     return False
@@ -683,7 +686,7 @@ class BrowserCaptureEngine:
     def start(self) -> None:
         """Register the global hotkey and begin listening."""
         if not AUTOMATION_AVAILABLE:
-            print("[Automation]: pynput/pyperclip not installed — hotkey capture disabled.")
+            logger.warning("[Automation]: pynput/pyperclip not installed — hotkey capture disabled.")
             return
 
         if _OS == "Windows":
@@ -700,7 +703,7 @@ class BrowserCaptureEngine:
             try:
                 engine.stop()
             except Exception as exc:
-                print(f"[Automation]: Error stopping hotkey engine: {exc}")
+                logger.error(f"[Automation]: Error stopping hotkey engine: {exc}")
 
     def set_hotkey(self, spec: HotkeySpec) -> None:
         """
@@ -729,7 +732,7 @@ class BrowserCaptureEngine:
                 t.name = "CaptureThread"
                 t.start()
             except Exception as exc:
-                print(f"[Automation]: Failed to start capture thread: {exc}")
+                logger.error(f"[Automation]: Failed to start capture thread: {exc}")
                 self._capture_in_progress = False  # pipeline never ran; reset
         return _on_hotkey
 
@@ -740,17 +743,16 @@ class BrowserCaptureEngine:
         engine.start()
         with self._lock:
             self._hotkey_engine = engine
-        print(f"[Automation]: Win32 hotkey engine started — {spec.display()}")
+        logger.info(f"[Automation]: Win32 hotkey engine started — {spec.display()}")
 
     def _start_pynput(self) -> None:
         try:
             enforce_linux_subsystem_guard()
         except PlatformSecurityException as exc:
-            print(str(exc), file=sys.stderr)
-            print(
+            logger.error(str(exc))
+            logger.warning(
                 "[Automation]: Hotkey capture disabled. "
                 "The app continues running without the browser macro feature.",
-                file=sys.stderr,
             )
             return
 
@@ -760,7 +762,7 @@ class BrowserCaptureEngine:
         engine.start()
         with self._lock:
             self._hotkey_engine = engine
-        print(f"[Automation]: pynput hotkey engine started — {spec.display()}")
+        logger.info(f"[Automation]: pynput hotkey engine started — {spec.display()}")
 
     # ── Internal: failure helper ──────────────────────────────────────────────
 
@@ -779,7 +781,7 @@ class BrowserCaptureEngine:
                 "status": "failed", "error": error,
             })
         except Exception as exc:
-            print(f"[Automation]: _push_failure itself failed: {exc}")
+            logger.error(f"[Automation]: _push_failure itself failed: {exc}")
 
     # ── Browser viewport refocus ──────────────────────────────────────────────
 
@@ -819,14 +821,14 @@ class BrowserCaptureEngine:
                 ctypes.windll.user32.PostMessageW(hwnd, 0x0202, 0x0000, lparam)
                 time.sleep(0.03)
             except Exception as exc:
-                print(f"[Automation]: Silent viewport refocus failed: {exc}")
+                logger.error(f"[Automation]: Silent viewport refocus failed: {exc}")
         else:
             try:
                 controller.press(_pynput_keyboard.Key.esc)
                 controller.release(_pynput_keyboard.Key.esc)
                 time.sleep(0.05)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
     # ── Capture pipeline ──────────────────────────────────────────────────────
 
@@ -860,7 +862,7 @@ class BrowserCaptureEngine:
         # platform config) — be permissive and allow the capture.
         active_proc = _get_active_process_name()
         if active_proc and active_proc not in _BROWSER_PROCESS_NAMES:
-            print(
+            logger.warning(
                 f"[Automation]: Macro aborted — foreground process "
                 f"'{active_proc}' is not a known browser."
             )
@@ -868,16 +870,17 @@ class BrowserCaptureEngine:
                 try:
                     self._warn()
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
             else:
                 try:
                     import jh_notifications
                     jh_notifications.send_notification(
                         "Job Hunter AI",
                         "Macro aborted: active window is not a browser.",
+                        is_error=True,
                     )
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
             self._capture_in_progress = False
             return
 
@@ -907,7 +910,7 @@ class BrowserCaptureEngine:
                 try:
                     controller.release(_mod)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
             time.sleep(0.05)  # one OS frame for the release events to propagate
 
             # Step C: immediate UI feedback
@@ -915,7 +918,7 @@ class BrowserCaptureEngine:
                 try:
                     self._notify()
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
 
             # Step D: URL capture
             url = self._capture_url(ctrl, controller)
@@ -925,39 +928,42 @@ class BrowserCaptureEngine:
 
             # MD5 fallback if URL capture failed but text capture succeeded
             if not url and raw_text:
+                # usedforsecurity=False: this hash is only a dedup key for the
+                # page text, never a security primitive.
                 digest = hashlib.md5(
-                    raw_text.encode("utf-8", errors="replace")
+                    raw_text.encode("utf-8", errors="replace"),
+                    usedforsecurity=False,
                 ).hexdigest()
                 url = f"hash:{digest}"
-                print(f"[Automation]: URL capture failed — using hash fallback: {url}")
+                logger.error(f"[Automation]: URL capture failed — using hash fallback: {url}")
 
             if not raw_text:
-                print("[Automation]: Empty page text captured — aborting.")
+                logger.warning("[Automation]: Empty page text captured — aborting.")
                 self._push_failure("empty_text")
                 return
 
             if not self._app_ready():
-                print("[Automation]: Assistant inactive — capture discarded.")
+                logger.warning("[Automation]: Assistant inactive — capture discarded.")
                 self._push_failure("inactive")
                 return
 
             payload = {"url": url, "text": raw_text, "title": "", "status": "success"}
             self._queue.put(payload)
-            print(
+            logger.info(
                 f"[Automation]: Queued — url={url[:80]!r}  text_len={len(raw_text)}"
             )
             if self._capture_success_fn:
                 try:
                     self._capture_success_fn()
                 except Exception as exc:
-                    print(f"[Automation]: Capture success callback raised: {exc}")
+                    logger.error(f"[Automation]: Capture success callback raised: {exc}")
 
         except ContentCaptureError as cce:
-            print(f"[Automation]: Content capture failed — {cce}")
+            logger.error(f"[Automation]: Content capture failed — {cce}")
             self._push_failure("content_capture_error")
 
         except Exception as exc:
-            print(f"[Automation]: Unhandled error in capture pipeline: {exc}")
+            logger.error(f"[Automation]: Unhandled error in capture pipeline: {exc}")
             self._push_failure(str(exc))
 
         finally:
@@ -967,14 +973,14 @@ class BrowserCaptureEngine:
             try:
                 _clipboard_write(original_clipboard)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
             try:
                 if controller is not None:
                     controller.press(_pynput_keyboard.Key.esc)
                     controller.release(_pynput_keyboard.Key.esc)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
             self._capture_in_progress = False  # always reached
 
@@ -1014,12 +1020,12 @@ class BrowserCaptureEngine:
             return candidate if candidate.startswith(("http://", "https://")) else ""
 
         except Exception as exc:
-            print(f"[Automation]: URL capture exception: {exc}")
+            logger.error(f"[Automation]: URL capture exception: {exc}")
             try:
                 controller.press(_pynput_keyboard.Key.esc)
                 controller.release(_pynput_keyboard.Key.esc)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             return ""
 
     def _capture_page_text(self, ctrl, controller, url: str = "") -> str:
@@ -1070,7 +1076,7 @@ class BrowserCaptureEngine:
                 controller.press(_pynput_keyboard.Key.esc)
                 controller.release(_pynput_keyboard.Key.esc)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
             wait_for_clipboard_change("", timeout=5.0)
 
@@ -1098,7 +1104,7 @@ class BrowserCaptureEngine:
         except ContentCaptureError:
             raise
         except Exception as exc:
-            print(f"[Automation]: Page-text capture exception: {exc}")
+            logger.error(f"[Automation]: Page-text capture exception: {exc}")
             return ""
         finally:
             # Guarantee the browser selection is visually cleared even when
@@ -1108,4 +1114,4 @@ class BrowserCaptureEngine:
                 controller.press(_pynput_keyboard.Key.esc)
                 controller.release(_pynput_keyboard.Key.esc)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)

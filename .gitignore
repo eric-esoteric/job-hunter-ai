@@ -107,6 +107,15 @@ settings.json
 user_settings.*
 profile.json
 
+# Job Hunter AI — локальные данные пользователя. Обычно живут в %APPDATA%\Job Hunter AI,
+# но игнорируем их и в репозитории на случай, если файлы будут скопированы сюда для отладки
+# (содержат API-ключи, резюме и историю вакансий — не должны попадать в git).
+local_settings.json
+saved_vacancies.json
+rejected_vacancies.json
+resume_history.json
+resume_history.*.json
+
 # ============================================================
 # COMPILED / BINARY ARTIFACTS
 # ============================================================

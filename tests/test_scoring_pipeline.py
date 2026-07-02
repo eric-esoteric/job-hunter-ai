@@ -220,11 +220,32 @@ class TestExtractRelevantContext:
         result = extract_relevant_context(raw, max_chars=1000)
         assert "Only paragraph" in result
 
-    def test_single_paragraph_exceeds_budget_skipped(self):
-        """A single paragraph larger than max_chars must result in empty output."""
+    def test_single_oversized_block_is_truncated_not_dropped(self):
+        """
+        A page that is one oversized block with no paragraph breaks must be
+        hard-truncated to the budget, NOT dropped to an empty string — an empty
+        result would leave the LLM with no vacancy text to evaluate.
+        """
         raw = "A" * 200
         result = extract_relevant_context(raw, max_chars=50)
-        assert result == ""
+        assert result != ""
+        assert len(result) <= 50
+        assert result == "A" * 50
+
+    def test_single_newline_page_yields_content(self):
+        """
+        Ctrl+A DOM captures often use single '\\n' separators (no blank lines).
+        The extractor must still return usable, budget-bounded content instead
+        of collapsing everything into one skipped block.
+        """
+        raw = "\n".join([
+            "Requirements: Python and Django experience required.",
+            "Responsibilities: build and maintain backend services.",
+            "We offer remote work and competitive salary.",
+        ])
+        result = extract_relevant_context(raw, max_chars=120)
+        assert result != ""
+        assert len(result) <= 120
 
     def test_whitespace_normalization_applied(self):
         raw = "First   paragraph.\r\n\r\nSecond  requirements   paragraph."

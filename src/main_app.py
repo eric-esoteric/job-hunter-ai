@@ -5,16 +5,19 @@ import json
 import threading
 import queue
 import time
-import webbrowser
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
 from PIL import Image
 import jh_ai_engine
 import jh_storage_manager
 import jh_results_ui
+import jh_url_utils
 import jh_version
 import jh_i18n
 from jh_i18n import tr
+from jh_log import get_logger
+
+logger = get_logger(__name__)
 
 # =====================================================================
 # НАСТРОЙКА DPI И СИСТЕМНОГО ОКРУЖЕНИЯ Windows
@@ -26,7 +29,7 @@ except Exception:
     try:
         ctypes.windll.user32.SetProcessDPIAware()
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
 # Пути к конфигурации
 APPDATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'Job Hunter AI')
@@ -144,7 +147,7 @@ def load_theme_config() -> str:
                 saved = json.load(f).get("theme", "Cyber-Owl")
                 return saved if saved in THEMES else "Cyber-Owl"
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
     return "Cyber-Owl"
 
 
@@ -169,9 +172,9 @@ def save_theme_config(theme_name: str) -> None:
             try:
                 os.remove(tmp_path)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
     except Exception as exc:
-        print(f"[Theme]: save error: {exc}")
+        logger.error(f"[Theme]: save error: {exc}")
 
 # Доступные модели по провайдерам
 ALL_PROVIDERS_MODELS = {
@@ -179,11 +182,15 @@ ALL_PROVIDERS_MODELS = {
     "OpenAI":    ["gpt-5-mini", "gpt-5", "o3-mini"],
     "Anthropic": ["claude-4-haiku", "claude-4-sonnet", "claude-4-opus"],
     "DeepSeek":  ["deepseek-chat", "deepseek-reasoner"],
+    # OpenRouter aggregates many vendors behind one OpenAI-compatible API;
+    # models are addressed as "vendor/model".
+    "OpenRouter": ["openai/gpt-5-mini", "anthropic/claude-4-sonnet",
+                   "google/gemini-3.5-flash", "deepseek/deepseek-chat"],
     "Ollama":    ["local-model"],
     "LM Studio": ["local-model"],
 }
 LOCAL_PROVIDERS = ("Ollama", "LM Studio")
-PROVIDER_ORDER  = ["Gemini", "OpenAI", "Anthropic", "DeepSeek", "Ollama", "LM Studio"]
+PROVIDER_ORDER  = ["Gemini", "OpenAI", "Anthropic", "DeepSeek", "OpenRouter", "Ollama", "LM Studio"]
 
 # Optional tray support
 try:
@@ -206,7 +213,7 @@ def force_dark_title_bar(window):
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(ctypes.c_int(1)), 4)
         ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 19, ctypes.byref(ctypes.c_int(1)), 4)
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
 
 def _apply_icon_win32(window):
@@ -216,7 +223,7 @@ def _apply_icon_win32(window):
     try:
         window.iconbitmap(ICON_PATH)
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
     try:
         import ctypes
         GA_ROOT = 2
@@ -235,7 +242,7 @@ def _apply_icon_win32(window):
         if icon_small:
             ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 0, icon_small)
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
 
 def center_window(window, width, height, parent=None):
@@ -243,7 +250,7 @@ def center_window(window, width, height, parent=None):
     try:
         window.attributes("-alpha", 0.0)
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
     def _apply():
         if not window.winfo_exists():
@@ -276,7 +283,7 @@ def center_window(window, width, height, parent=None):
                 window.attributes("-alpha", 1.0)
                 window.deiconify()
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
     window.after(15, _apply)
 
@@ -304,10 +311,10 @@ def bind_russian_hotkeys(widget):
                         if event.widget.selection_present():
                             event.widget.delete("sel.first", "sel.last")
                     except Exception:
-                        pass
+                        logger.debug("Suppressed exception", exc_info=True)
                 event.widget.insert("insert", text)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             return "break"
 
         elif keycode == 67 or key in ('c', 'cyrillic_es'):
@@ -319,12 +326,12 @@ def bind_russian_hotkeys(widget):
                     try:
                         sel = event.widget.selection_get()
                     except Exception:
-                        pass
+                        logger.debug("Suppressed exception", exc_info=True)
                 if sel:
                     event.widget.clipboard_clear()
                     event.widget.clipboard_append(sel)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             return "break"
 
         elif keycode == 65 or key in ('a', 'cyrillic_ef'):
@@ -336,7 +343,7 @@ def bind_russian_hotkeys(widget):
                     event.widget.select_range(0, "end")
                     event.widget.icursor("end")
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             return "break"
 
         elif keycode == 88 or key in ('x', 'cyrillic_che'):
@@ -356,15 +363,36 @@ def bind_russian_hotkeys(widget):
                             event.widget.clipboard_append(sel)
                             event.widget.delete("sel.first", "sel.last")
                     except Exception:
-                        pass
+                        logger.debug("Suppressed exception", exc_info=True)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             return "break"
 
     try:
         target.bind("<Control-KeyPress>", _handle)
     except Exception as e:
-        print(f"[Hotkeys]: bind error: {e}")
+        logger.error(f"[Hotkeys]: bind error: {e}")
+
+
+# =====================================================================
+# АДАПТЕР ОЧЕРЕДИ
+# =====================================================================
+class _EnqueueAdapter:
+    """
+    Thin shim handed to BrowserCaptureEngine in place of the raw queue.
+
+    The engine only ever calls .put(payload); routing that through
+    JobHunterApp.enqueue_vacancy restores pre-queue dedup, _batch_id tracking,
+    and the "added to queue" status feedback (all previously dead because the
+    engine wrote to the queue directly).
+    """
+    __slots__ = ("_app",)
+
+    def __init__(self, app):
+        self._app = app
+
+    def put(self, data, *args, **kwargs):
+        self._app.enqueue_vacancy(data)
 
 
 # =====================================================================
@@ -420,7 +448,7 @@ class JobHunterApp(ctk.CTk):
             import jh_notifications
             jh_notifications.apply_theme(_t)
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
         self.title(jh_version.get_window_title())
         self.resizable(False, False)
@@ -437,7 +465,7 @@ class JobHunterApp(ctk.CTk):
             if os.path.exists(ICON_PATH):
                 self.iconbitmap(ICON_PATH)
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
         self.setup_ui()
         self.load_config_to_ui()
@@ -453,8 +481,12 @@ class JobHunterApp(ctk.CTk):
         try:
             from jh_automation import BrowserCaptureEngine, HotkeySpec
             spec = HotkeySpec.from_config(self.app_config)
+            # Route every engine payload through enqueue_vacancy (pre-queue dedup,
+            # batch-id tracking, status feedback) instead of letting the engine
+            # push straight into the raw queue. The adapter exposes only .put(),
+            # the sole queue method the engine uses.
             self._automation = BrowserCaptureEngine(
-                vacancy_queue=self.vacancy_queue,
+                vacancy_queue=_EnqueueAdapter(self),
                 app_ready_fn=lambda: self.is_active,
                 hotkey_spec=spec,
                 notify_fn=self._make_hotkey_notify_fn(),
@@ -462,7 +494,7 @@ class JobHunterApp(ctk.CTk):
             )
             self._automation.start()
         except Exception as exc:
-            print(f"[Automation]: Failed to initialise: {exc}")
+            logger.error(f"[Automation]: Failed to initialise: {exc}")
             self._automation = None
 
     def _make_hotkey_notify_fn(self):
@@ -486,7 +518,7 @@ class JobHunterApp(ctk.CTk):
                 try:
                     self.after(0, _ui_update)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
         return _notify
 
     def _make_capture_success_fn(self):
@@ -509,14 +541,15 @@ class JobHunterApp(ctk.CTk):
                         tr("notif_capture_success"),
                         root=self,
                         on_click=self._bring_to_front,
+                        is_error=False,
                     )
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
             if self._alive.is_set():
                 try:
                     self.after(0, _ui)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
         return _on_success
 
     # ── System tray ───────────────────────────────────────────────────────────
@@ -538,7 +571,7 @@ class JobHunterApp(ctk.CTk):
             try:
                 self._tray_icon.stop()
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             self._tray_icon = None
 
         def _on_open(icon, _item):
@@ -547,7 +580,7 @@ class JobHunterApp(ctk.CTk):
             try:
                 self.after(0, self._restore_from_tray)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         def _on_exit(icon, _item):
             icon.stop()
@@ -571,7 +604,7 @@ class JobHunterApp(ctk.CTk):
                     tray_img = tray_img.resize((64, 64), Image.Resampling.LANCZOS)
                     break
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
         if tray_img is None:
             tray_img = Image.new("RGBA", (64, 64), (0, 216, 198, 255))
 
@@ -589,7 +622,7 @@ class JobHunterApp(ctk.CTk):
             self.focus_force()
             force_dark_title_bar(self)
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
     def _bring_to_front(self) -> None:
         """Brings the main window to the foreground; restores from tray if hidden."""
@@ -604,7 +637,7 @@ class JobHunterApp(ctk.CTk):
                     try:
                         self.after(0, self._restore_from_tray)
                     except Exception:
-                        pass
+                        logger.debug("Suppressed exception", exc_info=True)
             threading.Thread(target=_stop_then_restore, daemon=True, name="TrayStop").start()
         else:
             self._restore_from_tray()
@@ -619,14 +652,14 @@ class JobHunterApp(ctk.CTk):
             try:
                 self.after_cancel(self._server_poll_after_id)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         automation = getattr(self, "_automation", None)
         if automation is not None:
             try:
                 automation.stop()
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         worker = getattr(self, "worker_thread", None)
         if worker is not None and worker.is_alive():
@@ -658,7 +691,7 @@ class JobHunterApp(ctk.CTk):
                     size=(int(target_w / scaling), int(target_h / scaling))
                 )
         except Exception as e:
-            print(f"[Logo]: {e}")
+            logger.warning(f"[Logo]: {e}")
         return None
 
     # ── Main UI ───────────────────────────────────────────────────────────────
@@ -729,7 +762,7 @@ class JobHunterApp(ctk.CTk):
                 self.resume_input.delete("0.0", "end")
                 self.resume_input.insert("0.0", self.clipboard_get().strip())
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         self.btn_ai_settings = ctk.CTkButton(
             resume_header_frame, text="⚙", width=30, height=30,
@@ -864,20 +897,20 @@ class JobHunterApp(ctk.CTk):
                 try:
                     self.btn_toggle.configure(text=tr("btn_stop"))
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
             elif self._paused_mode:
                 try:
                     self._btn_resume.configure(text=tr("btn_resume"))
                     self._btn_reset.configure(text=tr("btn_reset_queue"))
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
             else:
                 try:
                     self.btn_toggle.configure(text=tr("btn_start"))
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
         except Exception as e:
-            print(f"[i18n]: retranslate_main_ui error: {e}")
+            logger.error(f"[i18n]: retranslate_main_ui error: {e}")
 
     def _show_normal_toggle(self):
         for w in self._toggle_frame.winfo_children():
@@ -961,45 +994,45 @@ class JobHunterApp(ctk.CTk):
         try:
             self.configure(fg_color=t["bg"])
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("label_title", []):
             try:
                 w.configure(text_color=t["accent"], font=fonts["title"])
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("label_muted", []):
             try:
                 w.configure(text_color=t["text_muted"], font=fonts["subtitle"])
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("label_body", []):
             try:
                 w.configure(text_color=t["text"], font=fonts["section"])
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("frame_card", []):
             try:
                 w.configure(fg_color=t["card_bg"], corner_radius=cr)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("input", []):
             try:
                 w.configure(fg_color=t["input_bg"], border_color=t["card_bg"],
                             text_color=t["text"])
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("textbox", []):
             try:
                 w.configure(fg_color=t["input_bg"], border_color=t["card_bg"],
                             text_color=t["text"])
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("btn_primary_sm", []):
             try:
@@ -1008,7 +1041,7 @@ class JobHunterApp(ctk.CTk):
                             border_width=pbw,
                             border_color=t["accent"] if pbw else t["card_bg"])
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("btn_gold", []):
             try:
@@ -1016,7 +1049,7 @@ class JobHunterApp(ctk.CTk):
                             text_color=t["bg"], corner_radius=cr,
                             font=fonts["btn_md"])
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         _icon_hover = t.get("icon_hover", t["secondary_hover"])
 
@@ -1026,7 +1059,7 @@ class JobHunterApp(ctk.CTk):
                             text_color=t["accent"], border_color=t["accent"],
                             corner_radius=cr)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("btn_gold_icon", []):
             try:
@@ -1034,7 +1067,7 @@ class JobHunterApp(ctk.CTk):
                             text_color=t["gold"], border_color=t["gold"],
                             corner_radius=cr)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("btn_danger_icon", []):
             try:
@@ -1042,7 +1075,7 @@ class JobHunterApp(ctk.CTk):
                             text_color=t["danger"], border_color=t["danger"],
                             corner_radius=cr)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         for w in tw.get("checkbox", []):
             try:
@@ -1050,12 +1083,12 @@ class JobHunterApp(ctk.CTk):
                             hover_color=t["accent_hover"], border_color=t["text_muted"],
                             checkmark_color=t["text"])
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         try:
             self.status_lbl.configure(text_color=t["accent"])
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
         if getattr(self, "_paused_mode", False):
             self._show_paused_toggle()
@@ -1065,13 +1098,13 @@ class JobHunterApp(ctk.CTk):
         try:
             jh_results_ui.apply_theme(t)
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
         try:
             import jh_notifications
             jh_notifications.apply_theme(t)
         except Exception:
-            pass
+            logger.debug("Suppressed exception", exc_info=True)
 
     # ── API Help ──────────────────────────────────────────────────────────────
 
@@ -1097,11 +1130,20 @@ class JobHunterApp(ctk.CTk):
             font=("Arial", 11), text_color=COLOR_TEXT_LIGHT, justify="left"
         ).pack(padx=25, pady=5)
 
+        def _open_help_link():
+            ok, reason = jh_url_utils.safely_open_url("https://aistudio.google.com/")
+            if not ok:
+                import jh_notifications
+                jh_notifications.send_notification(
+                    tr("invalid_link_title"), tr("invalid_link_body", reason=reason),
+                    root=help_win,
+                )
+
         ctk.CTkButton(
             help_win, text=tr("help_btn"),
             font=("Arial", 11, "bold"), fg_color=COLOR_CYAN_NEON,
             hover_color=COLOR_CYAN_HOVER, text_color=COLOR_BG_DARK, height=36,
-            command=lambda: webbrowser.open("https://aistudio.google.com/")
+            command=_open_help_link
         ).pack(pady=(15, 5))
 
         def _show():
@@ -1110,7 +1152,7 @@ class JobHunterApp(ctk.CTk):
             try:
                 help_win.attributes("-alpha", 0.0)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             try:
                 help_win.update_idletasks()
                 w, h = 460, 260
@@ -1135,11 +1177,11 @@ class JobHunterApp(ctk.CTk):
                 try:
                     _apply_icon_win32(help_win)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 try:
                     help_win.attributes("-alpha", 1.0)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 help_win.after(350, lambda: _apply_icon_win32(help_win) if help_win.winfo_exists() else None)
             help_win.after(100, _fin)
         help_win.after(120, _show)
@@ -1166,7 +1208,7 @@ class JobHunterApp(ctk.CTk):
             try:
                 is_up, msg = jh_ai_engine.check_local_server(provider, base_url)
             except Exception as e:
-                print(f"[LocalStatus]: {e}")
+                logger.warning(f"[LocalStatus]: {e}")
                 is_up, msg = False, "Server unreachable"
 
             def _apply():
@@ -1186,14 +1228,14 @@ class JobHunterApp(ctk.CTk):
                         try:
                             self.after_cancel(self._server_poll_after_id)
                         except Exception:
-                            pass
+                            logger.debug("Suppressed exception", exc_info=True)
                     self._server_poll_after_id = self.after(
                         10000, lambda: self.update_local_server_status(provider, _silent=True)
                     )
             try:
                 self.after(0, _apply)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         threading.Thread(target=_probe, daemon=True).start()
 
@@ -1230,12 +1272,12 @@ class JobHunterApp(ctk.CTk):
             try:
                 warn.grab_release()
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             warn.destroy()
             try:
                 parent_win.focus_force()
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
         ctk.CTkButton(
             warn, text=tr("warn_ok"), font=("Arial", 12, "bold"),
@@ -1250,7 +1292,7 @@ class JobHunterApp(ctk.CTk):
             try:
                 warn.attributes("-alpha", 0.0)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             try:
                 warn.update_idletasks()
                 w, h = 500, 400
@@ -1277,11 +1319,11 @@ class JobHunterApp(ctk.CTk):
                 try:
                     _apply_icon_win32(warn)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 try:
                     warn.attributes("-alpha", 1.0)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 warn.after(350, lambda: _apply_icon_win32(warn) if warn.winfo_exists() else None)
             warn.after(100, _fin)
         warn.after(120, _show_warn)
@@ -1379,7 +1421,7 @@ class JobHunterApp(ctk.CTk):
                 try:
                     api_key_entry._entry.configure(show="*")
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
 
         def apply_local_key_field_state(provider):
             is_local = provider in LOCAL_PROVIDERS
@@ -1392,7 +1434,7 @@ class JobHunterApp(ctk.CTk):
                                             placeholder_text=tr("key_placeholder_local"))
                     _reapply_show_mask()
                 except Exception as e:
-                    print(f"[Settings]: {e}")
+                    logger.warning(f"[Settings]: {e}")
             else:
                 try:
                     api_key_entry.configure(state="normal",
@@ -1403,7 +1445,7 @@ class JobHunterApp(ctk.CTk):
                         api_key_entry.insert(0, saved_key)
                     _reapply_show_mask()
                 except Exception as e:
-                    print(f"[Settings]: {e}")
+                    logger.warning(f"[Settings]: {e}")
 
         def on_provider_changed(new_provider):
             if _initialized[0]:
@@ -1413,7 +1455,7 @@ class JobHunterApp(ctk.CTk):
                         if str(api_key_entry.cget("state")) != "disabled":
                             temp_api_keys[old] = api_key_entry.get().strip()
                     except Exception:
-                        pass
+                        logger.debug("Suppressed exception", exc_info=True)
 
             self.app_config["current_provider"] = new_provider
             apply_local_key_field_state(new_provider)
@@ -1652,7 +1694,7 @@ class JobHunterApp(ctk.CTk):
                     if str(api_key_entry.cget("state")) != "disabled":
                         temp_api_keys[active_prov] = api_key_entry.get().strip()
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
             self.app_config["current_provider"]   = active_prov
             self.app_config["api_keys"]            = temp_api_keys
             self.app_config["request_delay"]       = int(delay_slider.get())
@@ -1703,7 +1745,7 @@ class JobHunterApp(ctk.CTk):
                     from jh_automation import HotkeySpec
                     automation.set_hotkey(HotkeySpec.from_config(self.app_config))
                 except Exception as _hk_exc:
-                    print(f"[Settings]: Hotkey re-registration failed: {_hk_exc}")
+                    logger.error(f"[Settings]: Hotkey re-registration failed: {_hk_exc}")
             self.update_status(tr("status_saved"), COLOR_CYAN_NEON)
             settings_win.destroy()
 
@@ -1737,7 +1779,7 @@ class JobHunterApp(ctk.CTk):
             try:
                 settings_win.attributes("-alpha", 0.0)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             try:
                 settings_win.update_idletasks()
                 w, h = 700, 520   # two-column layout; scroll absorbs DPI overflow
@@ -1766,11 +1808,11 @@ class JobHunterApp(ctk.CTk):
                 try:
                     _apply_icon_win32(settings_win)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 try:
                     settings_win.attributes("-alpha", 1.0)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 settings_win.after(350, lambda: _apply_icon_win32(settings_win) if settings_win.winfo_exists() else None)
             settings_win.after(100, _finalize)
 
@@ -1833,7 +1875,7 @@ class JobHunterApp(ctk.CTk):
             try:
                 jh_storage_manager.set_show_local_warning(value)
             except Exception as e:
-                print(f"[Config]: {e}")
+                logger.warning(f"[Config]: {e}")
         threading.Thread(target=_bg, daemon=True).start()
 
     # ── Toggle (Start / Stop) ─────────────────────────────────────────────────
@@ -1939,22 +1981,37 @@ class JobHunterApp(ctk.CTk):
             try:
                 self.after(0, lambda: self.status_lbl.configure(text=text, text_color=color))
             except Exception as e:
-                print(f"[Status]: {e}")
+                logger.warning(f"[Status]: {e}")
 
     def _safe_after(self, ms, callback):
         if self._alive.is_set():
             try:
                 self.after(ms, callback)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
 
     # ── Vacancy queue ─────────────────────────────────────────────────────────
 
     def enqueue_vacancy(self, data):
         """
-        Enqueues an incoming vacancy dict. Performs O(1) dedup via in-memory URL sets.
-        Called from the automation daemon thread — queue.Queue.put() is thread-safe.
+        Single entry point for payloads produced by BrowserCaptureEngine.
+
+        Performs O(1) dedup via the in-memory URL sets BEFORE the item enters
+        the queue — so a duplicate is dropped immediately instead of sitting
+        through the full request-delay countdown only to be discarded by the
+        worker. Also advances _batch_id so the worker's "queue done"
+        notification guard can detect that new work arrived.
+
+        Called from the automation daemon thread — queue.Queue.put(),
+        update_status() (via .after), and the storage checks (lock-guarded)
+        are all safe to invoke from there.
         """
+        # Failure sentinels must always reach the worker so it can reset the UI
+        # loading state; they carry no URL and bypass dedup/counters entirely.
+        if data.get("status") == "failed":
+            self.vacancy_queue.put(data)
+            return
+
         url = data.get("url", "")
         if url and url != "#":
             if (jh_storage_manager.vacancy_url_in_approved(url) or
@@ -1991,7 +2048,7 @@ class JobHunterApp(ctk.CTk):
                     try:
                         self.vacancy_queue.task_done()
                     except Exception:
-                        pass
+                        logger.debug("Suppressed exception", exc_info=True)
                     continue
 
                 delay_seconds = self.app_config.get("request_delay", 15)
@@ -2028,14 +2085,14 @@ class JobHunterApp(ctk.CTk):
                         try:
                             self.vacancy_queue.task_done()
                         except Exception:
-                            pass
+                            logger.debug("Suppressed exception", exc_info=True)
                         continue
 
                     self.process_incoming_vacancy(vacancy_data)
                     try:
                         self.vacancy_queue.task_done()
                     except Exception:
-                        pass
+                        logger.debug("Suppressed exception", exc_info=True)
 
                     if self.vacancy_queue.empty():
                         captured_batch = self._batch_id
@@ -2054,19 +2111,20 @@ class JobHunterApp(ctk.CTk):
                                            rejected=self._session_rejected),
                                         root=self,
                                         on_click=self._bring_to_front,
+                                        is_error=False,
                                     )
                                 except Exception:
-                                    pass
+                                    logger.debug("Suppressed exception", exc_info=True)
                         self._safe_after(2000, _deferred_notif)
 
             except Exception as exc:
                 import traceback
-                print(f"[Worker]: Unhandled error processing vacancy: {exc}")
+                logger.error(f"[Worker]: Unhandled error processing vacancy: {exc}")
                 traceback.print_exc()
                 try:
                     self.vacancy_queue.task_done()
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
 
             finally:
                 self._worker_has_item = False
@@ -2074,7 +2132,11 @@ class JobHunterApp(ctk.CTk):
     def process_incoming_vacancy(self, vacancy_data):
         """Sends one vacancy through the AI engine and persists the result."""
         self.update_status(tr("status_analyzing"), COLOR_GOLD)
-        self.app_config = jh_storage_manager.load_config()
+        # self.app_config is kept current in-memory by the settings window
+        # (save_and_close / on_language_changed mutate it in place), so there is
+        # no need to re-read and re-parse config.json from disk on every single
+        # vacancy. Just make sure the engine renders reject reasons in the
+        # currently-selected language.
         jh_i18n.set_language(self.app_config.get("language", "en"))
 
         try:
@@ -2082,22 +2144,25 @@ class JobHunterApp(ctk.CTk):
                 vacancy_data, self.app_config,
                 cancel_event=self.stop_worker_event,
             )
-            company     = extracted_info.get("company", vacancy_data.get("company", "Unknown"))
-            title       = extracted_info.get("title",   vacancy_data.get("title",   "Unknown"))
-            url         = vacancy_data.get("url", "#")
-            description = vacancy_data.get("text", "")
+            company         = extracted_info.get("company", vacancy_data.get("company", "Unknown"))
+            title           = extracted_info.get("title",   vacancy_data.get("title",   "Unknown"))
+            url             = vacancy_data.get("url", "#")
+            description     = vacancy_data.get("text", "")
+            vacancy_country = extracted_info.get("vacancy_country", "")
 
             if status == "APPROVED":
                 jh_storage_manager.save_approved_vacancy(
                     company=company, title=title, url=url,
-                    cover_letter=result_text, description=description
+                    cover_letter=result_text, description=description,
+                    vacancy_country=vacancy_country,
                 )
                 self._session_approved  += 1
                 self._session_processed += 1
                 self.update_status(tr("status_approved", title=title, company=company), COLOR_CYAN_NEON)
             elif status == "REJECTED":
                 jh_storage_manager.save_rejected_vacancy(
-                    company=company, title=title, url=url, reason=result_text
+                    company=company, title=title, url=url, reason=result_text,
+                    vacancy_country=vacancy_country,
                 )
                 self._session_rejected  += 1
                 self._session_processed += 1
@@ -2115,9 +2180,9 @@ class JobHunterApp(ctk.CTk):
             if self.app_config.get("notifications_enabled", True):
                 try:
                     import jh_notifications
-                    jh_notifications.send_notification("Job Hunter AI", tr("notif_error_body"), root=self, on_click=self._bring_to_front)
+                    jh_notifications.send_notification("Job Hunter AI", tr("notif_error_body"), root=self, on_click=self._bring_to_front, is_error=True)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
 
     # ── PDF import ────────────────────────────────────────────────────────────
 
@@ -2140,7 +2205,13 @@ class JobHunterApp(ctk.CTk):
                     self.after(0, lambda: self.update_status(tr("pdf_error_damaged"), COLOR_RED))
                     self.after(0, lambda: self.btn_pdf_import.configure(state="normal"))
                     return
-                pages_text = [page.extract_text() for page in reader.pages if page.extract_text()]
+                # Extract once per page — extract_text() is the expensive call,
+                # so never invoke it twice (once in the filter, once in the body).
+                pages_text = []
+                for page in reader.pages:
+                    t = page.extract_text()
+                    if t:
+                        pages_text.append(t)
                 raw_text   = "\n".join(pages_text).strip()
                 if not raw_text:
                     self.after(0, lambda: self.update_status(tr("pdf_error_no_text"), COLOR_RED))
@@ -2262,7 +2333,7 @@ class JobHunterApp(ctk.CTk):
             try:
                 hist_win.attributes("-alpha", 0.0)
             except Exception:
-                pass
+                logger.debug("Suppressed exception", exc_info=True)
             try:
                 hist_win.update_idletasks()
                 w, h = 460, 420
@@ -2285,11 +2356,11 @@ class JobHunterApp(ctk.CTk):
                 try:
                     _apply_icon_win32(hist_win)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 try:
                     hist_win.attributes("-alpha", 1.0)
                 except Exception:
-                    pass
+                    logger.debug("Suppressed exception", exc_info=True)
                 hist_win.after(350, lambda: _apply_icon_win32(hist_win) if hist_win.winfo_exists() else None)
             hist_win.after(100, _fin)
         hist_win.after(120, _show_hist)
@@ -2315,7 +2386,7 @@ def _signal_running_instance() -> None:
             s.connect(("127.0.0.1", _WAKE_PORT))
             s.sendall(b"wake")
     except Exception:
-        pass
+        logger.debug("Suppressed exception", exc_info=True)
 
 
 def _acquire_single_instance_lock():
@@ -2341,7 +2412,7 @@ def _acquire_single_instance_lock():
             None, False, "Local\\JobHunterAI_v3_SingleInstance"
         )
         if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
-            print("[SingleInstance]: Another instance is already running. Signalling it.")
+            logger.warning("[SingleInstance]: Another instance is already running. Signalling it.")
             _signal_running_instance()
             os._exit(0)
         return handle  # Keep alive — OS closes it when the process exits
@@ -2352,7 +2423,7 @@ def _acquire_single_instance_lock():
         try:
             _sock.bind(("127.0.0.1", _WAKE_PORT))
         except OSError:
-            print("[SingleInstance]: Another instance is already running. Signalling it.")
+            logger.warning("[SingleInstance]: Another instance is already running. Signalling it.")
             _signal_running_instance()
             os._exit(0)
         return _sock  # Keep reference alive; never .close()'d

@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-3670A0?style=flat&logo=python&logoColor=ffdd54" alt="Python">
-  <img src="https://img.shields.io/badge/Release-v3.0.0-00B981?style=flat" alt="Release">
+  <img src="https://img.shields.io/badge/Release-v3.1-00B981?style=flat" alt="Release">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-0078D4?style=flat&logo=linux&logoColor=white" alt="Platform">
   <img src="https://img.shields.io/badge/License-Non--Commercial-EF4444?style=flat" alt="License">
 </p>
@@ -50,7 +50,7 @@ https://github.com/user-attachments/assets/ab707ab6-42a2-4939-bdd4-e7700fc2d999
         <li>🔑 <b>One hotkey — any browser</b> — Chrome, Firefox, Edge, Brave, any site</li>
         <li>🛡️ <b>Hard filter up to 60%</b> — scam, MLM, toxic conditions, info-business don't get through</li>
         <li>✍️ <b>Cover letter in seconds</b> — personalized to the real pain points of the employer</li>
-        <li>🌐 <b>Cloud or your PC</b> — Gemini, GPT-5, Claude 4 <i>or</i> Ollama / LM Studio (offline)</li>
+        <li>🌐 <b>Cloud or your PC</b> — Gemini, GPT-5, Claude 4, DeepSeek, OpenRouter <i>or</i> Ollama / LM Studio (offline)</li>
         <li>🔒 <b>Full privacy</b> — with local AI, nothing leaves your machine</li>
         <li>🌍 <b>EN / RU</b> — interface language = letter language and PDF resume parsing</li>
       </ul>
@@ -106,7 +106,7 @@ The app lives in the **system tray** and runs silently in the background.
   <tr>
     <td width="60%" valign="top">
       <b>🧠 Multi-engine AI cascade with Failover</b><br>
-      Automatic switching between Gemini, GPT-5, Claude 4, DeepSeek, and local models. If the primary provider is unavailable — the next one takes over without losing the task.
+      Automatic switching between Gemini, GPT-5, Claude 4, DeepSeek, OpenRouter, and local models. If the primary provider is unavailable — the next one takes over without losing the task.
       <br><br>
       <b>🏠 Local AI — no internet, no API keys</b><br>
       Native HTTP integration with Ollama and LM Studio. A background probe monitors server availability and reflects status in the UI. <code>LOCAL_SAFE_PARAMS</code> compensate for artifacts in quantized 4-bit models.
@@ -185,8 +185,9 @@ The app lives in the **system tray** and runs silently in the background.
                   │  Stage 1  12 000 chars  → Filter   │  budget invariant
                   │  Stage 2   8 000 chars  → Letter   │
                   │                                    │
-                  │  Gemini → GPT-5 → Claude 4         │  Failover Chain
-                  │  → DeepSeek → Ollama → LM Studio   │  Exp. Backoff
+                  │  Gemini → GPT-5 → Claude 4 →       │  Failover Chain
+                  │  DeepSeek → OpenRouter →           │  Exp. Backoff
+                  │  Ollama → LM Studio                │
                   │  5-level JSON repair pipeline      │
                   └──────────┬─────────────┬──────────┘
                     REJECTED │             │ APPROVED
@@ -235,7 +236,7 @@ The app lives in the **system tray** and runs silently in the background.
 | **Hotkey Capture** | `pynput.keyboard.GlobalHotKeys` · hardware VK codes (layout-independent) · `pyperclip` clipboard |
 | **Platform Guard** | `PlatformSecurityException` · Wayland zero-trust guard · graceful degradation on unsupported sessions |
 | **Localization** | `jh_i18n.py` — declarative EN/RU with `tr(key, **kwargs)` named variable substitution |
-| **AI Cascade** | **Gemini 2.5** · **GPT-5 / o3** · **Claude 4** · **DeepSeek** (chat / reasoner) · **Ollama** · **LM Studio** |
+| **AI Cascade** | **Gemini 2.5** · **GPT-5 / o3** · **Claude 4** · **DeepSeek** (chat / reasoner) · **OpenRouter** (multi-vendor) · **Ollama** · **LM Studio** |
 | **Scoring Pipeline** | `extract_relevant_context()` · `_VACANCY_KW_RE` keyword scoring · Narrative Rule · `pack_paragraphs_to_budget()` |
 | **Resilience** | Failover Chain · Exponential Backoff · 5-level JSON repair · `AINetworkError` / `AITimeoutError` / `AIAuthError` / `AIRateLimitError` hierarchy |
 | **Storage** | `_write_json_atomic()` Write-Copy-Replace + `fsync` · `_file_lock` + `_url_lock` · O(1) dedup · always-live URL sets |
@@ -248,8 +249,37 @@ The app lives in the **system tray** and runs silently in the background.
 
 ## 🚀 Changelog
 
+<details open>
+<summary><b>🟢 v3.1 — OpenRouter provider + reliability hardening (Current)</b></summary>
+
+<br>
+
+> **Adds OpenRouter as a sixth AI provider and fixes a batch of reliability and privacy issues surfaced by a full code audit.**
+
+**New provider**
+
+* **[AI]** New `OpenRouterProvider` (`jh_ai_engine.py`) — cloud aggregator exposing many vendors (OpenAI, Anthropic, Google, DeepSeek, …) through a single OpenAI-compatible endpoint (`https://openrouter.ai/api/v1/chat/completions`). Models are addressed as `vendor/model` (e.g. `openai/gpt-5-mini`, `anthropic/claude-4-sonnet`). Requires an API key; runs through the same Failover Chain as every other cloud provider. Registered in `get_provider()`, `PROVIDER_ORDER`, `ALL_PROVIDERS_MODELS`, and the config defaults (`api_keys` / `active_models`) — existing configs auto-migrate the new keys on load.
+
+**Reliability fixes**
+
+* **[Fix]** **Rejected-vacancy dedup set desynced from disk.** `save_rejected_vacancy()` caps the on-disk log at 50 records but was adding every URL to the in-memory `_rejected_urls` set without ever removing evicted ones. The set grew unbounded and kept reporting evicted vacancies as "already rejected", so they could never be re-evaluated. The set is now rebuilt from the capped list on every write.
+* **[Fix]** **Empty context sent to the LLM on single-block pages.** `extract_relevant_context()` split only on blank lines, so a `Ctrl+A` capture with single-`\n` separators collapsed into one oversized block that was skipped whole, returning `""`. Added a single-newline fallback split and a hard-truncation guarantee so a non-empty page always yields non-empty content within the char budget.
+* **[Fix]** **Duplicate detection and queue feedback were dead code.** The capture engine wrote straight to the raw queue, bypassing `enqueue_vacancy()` — so pre-queue dedup, `_batch_id` tracking, and the "added to queue" status never ran, and duplicates were only discarded after the full request-delay countdown. The engine now routes through an `_EnqueueAdapter`, restoring O(1) pre-queue dedup and correct batch-completion notifications.
+* **[Perf]** Stopped re-reading and re-parsing `config.json` from disk on **every** processed vacancy (`process_incoming_vacancy`); the in-memory config is already kept current by the settings window.
+* **[Perf]** PDF import no longer calls `page.extract_text()` twice per page.
+
+**Security & correctness**
+
+* **[Security]** Gemini API key moved from the URL query string to the `x-goog-api-key` header (query strings leak into logs and exception traces).
+* **[Fix]** JSON repair no longer corrupts apostrophes: the mixed-quote level only converts single quotes acting as JSON string delimiters, leaving `don't`-style values intact.
+* **[Fix]** Geo matching (`_geo_match`, now module-level and unit-tested) uses whole-word token sets instead of loose substrings — `"India"` no longer matches `"Indiana"`.
+* **[Cleanup]** Explicit `is_error` flag on `send_notification()` (no more brittle substring guessing), `hashlib.md5(..., usedforsecurity=False)` for the dedup-only hash, and a startup sweep of stale `*.tmp` files orphaned by hard exit.
+* **[Tests]** Added `tests/test_bugfixes.py` (rejected-set sync, geo matching, JSON repair) and extended `tests/test_scoring_pipeline.py` for the new extraction contract.
+
+</details>
+
 <details>
-<summary><b>🟢 v3.0.0 — Standalone. No extension required. (Current)</b></summary>
+<summary><b>🟢 v3.0.0 — Standalone. No extension required.</b></summary>
 
 <br>
 
@@ -380,7 +410,7 @@ The app lives in the **system tray** and runs silently in the background.
 </details>
 
 <details>
-<summary><b>🔵 v3.1.0 — macOS (Planned)</b></summary>
+<summary><b>🔵 v3.2 — macOS (Planned)</b></summary>
 
 - [ ] macOS support — kVK keycodes already implemented in `jh_automation.py`, needs end-to-end testing.
 - [ ] `build_mac.py` with `.app` bundle and `.dmg` packaging.
@@ -414,5 +444,5 @@ If something breaks — open an Issue. Critical bugs will be fixed.
 ---
 
 <p align="center">
-  <sub>Made for people who value their time · Non-Commercial · v3.0.0</sub>
+  <sub>Made for people who value their time · Non-Commercial · v3.1</sub>
 </p>
